@@ -3,8 +3,9 @@ spring:
     name: flowroad-backend
   
   # (Capa de Infraestructura)
-  mongodb:
-    uri: ${MONGO_URI:mongodb://localhost:27017/flowroad_db}
+  data:
+    mongodb:
+      uri: ${MONGO_URI:mongodb://localhost:27017/flowroad_db}
 
 # Configuración del servidor embebido
 server:

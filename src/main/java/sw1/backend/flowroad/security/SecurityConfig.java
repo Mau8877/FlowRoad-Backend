@@ -31,7 +31,7 @@ public class SecurityConfig {
                 // 2. Configuramos los permisos de las rutas
                 .authorizeHttpRequests(auth -> auth
                         // Rutas públicas: Registro y Login de la API v1
-                        .requestMatchers("/api/v1/auth/**").permitAll()
+                        .requestMatchers("/auth/**", "/api/v1/auth/**").permitAll()
                         // Cualquier otra petición debe tener un JWT válido
                         .anyRequest().authenticated())
 

@@ -16,19 +16,31 @@ public class User implements UserDetails {
     private String id;
     private String email;
     private String password;
-    private String role; // Ej: "ROLE_ADMIN" o "ROLE_USER"
+    private String role;
 
-    // Constructores vacíos y con parámetros necesarios para Spring Data
+    // El perfil le pertenece única y exclusivamente a este usuario
+    private UserProfile perfil;
+
+    // Conexión con la empresa
+    private String empresaId;
+    private String departamento;
+    private String cargo;
+
     public User() {
     }
 
-    public User(String email, String password, String role) {
+    public User(String email, String password, String role, UserProfile perfil, String empresaId, String departamento,
+            String cargo) {
         this.email = email;
         this.password = password;
         this.role = role;
+        this.perfil = perfil;
+        this.empresaId = empresaId;
+        this.departamento = departamento;
+        this.cargo = cargo;
     }
 
-    // Getters y Setters
+    // --- Getters y Setters User ---
     public String getId() {
         return id;
     }
@@ -57,6 +69,39 @@ public class User implements UserDetails {
         this.role = role;
     }
 
+    // --- Getters y Setters de Sub-documentos y Laborales ---
+    public UserProfile getPerfil() {
+        return perfil;
+    }
+
+    public void setPerfil(UserProfile perfil) {
+        this.perfil = perfil;
+    }
+
+    public String getEmpresaId() {
+        return empresaId;
+    }
+
+    public void setEmpresaId(String empresaId) {
+        this.empresaId = empresaId;
+    }
+
+    public String getDepartamento() {
+        return departamento;
+    }
+
+    public void setDepartamento(String departamento) {
+        this.departamento = departamento;
+    }
+
+    public String getCargo() {
+        return cargo;
+    }
+
+    public void setCargo(String cargo) {
+        this.cargo = cargo;
+    }
+
     // --- Métodos obligatorios de UserDetails (Spring Security) ---
     @Override
     public Collection<? extends GrantedAuthority> getAuthorities() {
@@ -71,7 +116,7 @@ public class User implements UserDetails {
     @Override
     public String getUsername() {
         return email;
-    } // Usamos el email como username
+    }
 
     @Override
     public boolean isAccountNonExpired() {
