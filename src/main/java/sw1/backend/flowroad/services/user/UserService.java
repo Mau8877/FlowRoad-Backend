@@ -4,11 +4,14 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
 import sw1.backend.flowroad.dtos.user.UserResponse;
+import sw1.backend.flowroad.dtos.organization.CargoSummaryResponse;
+import sw1.backend.flowroad.dtos.organization.DepartmentSummaryResponse;
 import sw1.backend.flowroad.dtos.user.UpdateUserRequest;
 import sw1.backend.flowroad.dtos.user.UserProfileResponse;
 import sw1.backend.flowroad.models.user.User;
-import sw1.backend.flowroad.models.user.UserProfile;
 import sw1.backend.flowroad.models.user.Roles;
+import sw1.backend.flowroad.repository.organization.DepartmentRepository;
+import sw1.backend.flowroad.repository.organization.CargoRepository;
 import sw1.backend.flowroad.repository.user.UserRepository;
 import sw1.backend.flowroad.exceptions.ResourceNotFoundException;
 
@@ -20,6 +23,8 @@ import java.util.stream.Collectors;
 public class UserService {
 
     private final UserRepository userRepository;
+    private final DepartmentRepository departmentRepository;
+    private final CargoRepository cargoRepository;
 
     // 1. OBTENER PERFIL POR ID
     public UserResponse getById(String id) {
@@ -39,29 +44,29 @@ public class UserService {
     // 3. ACTUALIZAR USUARIO
     public UserResponse update(String id, UpdateUserRequest request) {
         User user = userRepository.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("No se puede actualizar: Usuario no encontrado"));
+                .orElseThrow(() -> new ResourceNotFoundException("Usuario no encontrado"));
 
-        UserProfile profile = user.getProfile();
-        if (profile == null)
-            profile = new UserProfile();
+        // Actualizar Perfil
+        if (request.profile() != null) {
+            user.getProfile().setNombre(request.profile().nombre());
+            user.getProfile().setApellido(request.profile().apellido());
+            user.getProfile().setTelefono(request.profile().telefono());
+            user.getProfile().setDireccion(request.profile().direccion());
+            user.getProfile().setAvatarUrl(request.profile().avatarUrl());
+        }
 
-        profile.setNombre(request.nombre());
-        profile.setApellido(request.apellido());
-        profile.setTelefono(request.telefono());
-        profile.setDireccion(request.direccion());
-        profile.setAvatarUrl(request.avatarUrl());
-
-        user.setProfile(profile);
-
-        if (request.departmentId() != null)
+        // Actualizar campos administrativos (solo si vienen en el request)
+        if (request.departmentId() != null && !request.departmentId().isBlank()) {
             user.setDepartmentId(request.departmentId());
-        if (request.cargoId() != null)
-            user.setCargoId(request.cargoId());
-        if (request.isActive() != null)
-            user.setIsActive(request.isActive());
+        }
 
-        // OPCIONAL: Si permites cambiar el ROL en el update
-        // if (request.role() != null) user.setRole(request.role());
+        if (request.cargoId() != null && !request.cargoId().isBlank()) {
+            user.setCargoId(request.cargoId());
+        }
+
+        if (request.isActive() != null) {
+            user.setIsActive(request.isActive());
+        }
 
         return convertToResponseDTO(userRepository.save(user));
     }
@@ -89,12 +94,19 @@ public class UserService {
         UserResponse res = new UserResponse();
         res.setId(user.getId());
         res.setEmail(user.getEmail());
-
         res.setRole(user.getRole());
-
         res.setOrgId(user.getOrgId());
-        res.setDepartmentId(user.getDepartmentId());
-        res.setCargoId(user.getCargoId());
+
+        if (user.getDepartmentId() != null && !user.getDepartmentId().isBlank()) {
+            departmentRepository.findById(user.getDepartmentId())
+                    .ifPresent(dept -> res.setDepartment(new DepartmentSummaryResponse(dept.getId(), dept.getName())));
+        }
+
+        if (user.getCargoId() != null && !user.getCargoId().isBlank()) {
+            cargoRepository.findById(user.getCargoId())
+                    .ifPresent(cargo -> res.setCargo(new CargoSummaryResponse(cargo.getId(), cargo.getName())));
+        }
+
         res.setWorkload(user.getWorkload());
         res.setIsActive(user.getIsActive());
         res.setCreatedAt(user.getCreatedAt());
