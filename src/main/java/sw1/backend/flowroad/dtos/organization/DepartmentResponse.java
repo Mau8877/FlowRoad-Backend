@@ -14,5 +14,5 @@ public class DepartmentResponse {
         private Integer slaHours;
         private Boolean isActive;
         private LocalDateTime createdAt;
-        private List<String> cargoIds;
+        private List<CargoSummaryResponse> cargos;
 }

@@ -6,6 +6,7 @@ import org.springframework.stereotype.Service;
 import sw1.backend.flowroad.dtos.organization.DepartmentResponse;
 import sw1.backend.flowroad.dtos.organization.CreateDepartmentRequest;
 import sw1.backend.flowroad.dtos.organization.UpdateDepartmentRequest;
+import sw1.backend.flowroad.dtos.organization.CargoSummaryResponse; // 👈 Asegúrate de importarlo
 import sw1.backend.flowroad.models.organization.Department;
 import sw1.backend.flowroad.repository.organization.DepartmentRepository;
 import sw1.backend.flowroad.repository.organization.OrganizationRepository;
@@ -35,12 +36,8 @@ public class DepartmentService {
                     "El código de departamento '" + request.code() + "' ya está en uso en esta empresa.");
         }
 
-        for (String cargoId : request.cargoIds()) {
-            if (!cargoRepository.existsById(cargoId)) {
-                throw new ResourceNotFoundException(
-                        "No se puede crear el departamento: El cargo con ID " + cargoId + " no existe.");
-            }
-        }
+        // Validar que todos los cargos existan
+        validateCargosExist(request.cargos());
 
         Department dept = new Department();
         dept.setOrgId(request.orgId());
@@ -48,7 +45,7 @@ public class DepartmentService {
         dept.setName(request.name());
         dept.setCode(request.code().toUpperCase());
         dept.setSlaHours(request.slaHours());
-        dept.setCargoIds(request.cargoIds());
+        dept.setCargoIds(request.cargos()); // En el modelo guardamos los IDs
         dept.setIsActive(true);
 
         return convertToResponseDTO(departmentRepository.save(dept));
@@ -74,19 +71,14 @@ public class DepartmentService {
         Department dept = departmentRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("No se puede actualizar: Departamento no encontrado"));
 
-        // Validar cargos antes de actualizar la lista
-        for (String cargoId : request.cargoIds()) {
-            if (!cargoRepository.existsById(cargoId)) {
-                throw new ResourceNotFoundException(
-                        "Error en actualización: El cargo con ID " + cargoId + " no existe.");
-            }
-        }
+        validateCargosExist(request.cargos());
 
         dept.setManagerId(request.managerId());
         dept.setName(request.name());
+        dept.setCode(request.code().toUpperCase());
         dept.setSlaHours(request.slaHours());
         dept.setIsActive(request.isActive());
-        dept.setCargoIds(request.cargoIds());
+        dept.setCargoIds(request.cargos());
 
         return convertToResponseDTO(departmentRepository.save(dept));
     }
@@ -100,7 +92,17 @@ public class DepartmentService {
         departmentRepository.save(dept);
     }
 
-    // --- MAPPER PRIVADO ---
+    // --- MÉTODOS DE APOYO ---
+
+    private void validateCargosExist(List<String> cargoIds) {
+        for (String cargoId : cargoIds) {
+            if (!cargoRepository.existsById(cargoId)) {
+                throw new ResourceNotFoundException(
+                        "Error: El cargo con ID " + cargoId + " no existe.");
+            }
+        }
+    }
+
     private DepartmentResponse convertToResponseDTO(Department dept) {
         DepartmentResponse res = new DepartmentResponse();
         res.setId(dept.getId());
@@ -111,7 +113,18 @@ public class DepartmentService {
         res.setSlaHours(dept.getSlaHours());
         res.setIsActive(dept.getIsActive());
         res.setCreatedAt(dept.getCreatedAt());
-        res.setCargoIds(dept.getCargoIds());
+
+        // Mapeo de IDs a Objetos Summary para el Frontend
+        if (dept.getCargoIds() != null && !dept.getCargoIds().isEmpty()) {
+            List<CargoSummaryResponse> cargosInfo = cargoRepository.findAllById(dept.getCargoIds())
+                    .stream()
+                    .map(c -> new CargoSummaryResponse(c.getId(), c.getName()))
+                    .collect(Collectors.toList());
+            res.setCargos(cargosInfo);
+        } else {
+            res.setCargos(List.of());
+        }
+
         return res;
     }
 }
