@@ -1,27 +1,31 @@
 package sw1.backend.flowroad.services.auth;
 
-import lombok.RequiredArgsConstructor;
+import java.time.LocalDateTime;
+import java.util.HashMap;
+import java.util.Map;
+
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
-import sw1.backend.flowroad.dtos.auth.*;
+import lombok.RequiredArgsConstructor;
+import sw1.backend.flowroad.dtos.auth.AuthResponse;
+import sw1.backend.flowroad.dtos.auth.LoginRequest;
+import sw1.backend.flowroad.dtos.auth.RegisterClientRequest;
+import sw1.backend.flowroad.dtos.auth.RegisterCustomUserRequest;
+import sw1.backend.flowroad.dtos.auth.RegisterWorkerRequest;
 import sw1.backend.flowroad.dtos.user.UserProfileRequest;
-import sw1.backend.flowroad.security.JwtService;
 import sw1.backend.flowroad.exceptions.AuthException;
 import sw1.backend.flowroad.exceptions.ResourceNotFoundException;
 import sw1.backend.flowroad.models.user.Roles;
 import sw1.backend.flowroad.models.user.User;
 import sw1.backend.flowroad.models.user.UserProfile;
-import sw1.backend.flowroad.repository.user.UserRepository;
-import sw1.backend.flowroad.repository.organization.OrganizationRepository;
-import sw1.backend.flowroad.repository.organization.DepartmentRepository;
 import sw1.backend.flowroad.repository.organization.CargoRepository;
-
-import java.time.LocalDateTime;
-import java.util.HashMap;
-import java.util.Map;
+import sw1.backend.flowroad.repository.organization.DepartmentRepository;
+import sw1.backend.flowroad.repository.organization.OrganizationRepository;
+import sw1.backend.flowroad.repository.user.UserRepository;
+import sw1.backend.flowroad.security.JwtService;
 
 @Service
 @RequiredArgsConstructor
@@ -65,17 +69,29 @@ public class AuthService {
             throw new AuthException("El correo ya está en uso.");
         }
 
-        // VALIDACIÓN DE INTEGRIDAD ORGANIZACIONAL
         if (!organizationRepository.existsById(request.orgId())) {
             throw new ResourceNotFoundException("La organización no existe.");
         }
-        if (!departmentRepository.existsById(request.departmentId())) {
+
+        // 1. PRIMERO validamos la regla de negocio: Si es WORKER, es obligatorio que
+        // vengan los IDs
+        if (request.role() == Roles.WORKER) {
+            if (request.departmentId() == null || request.cargoId() == null) {
+                throw new IllegalArgumentException(
+                        "Los trabajadores operativos deben tener un departamento y cargo asignado.");
+            }
+        }
+
+        // 2. LUEGO, consultamos a la base de datos SOLO si los IDs no son nulos
+        if (request.departmentId() != null && !departmentRepository.existsById(request.departmentId())) {
             throw new ResourceNotFoundException("El departamento no existe.");
         }
-        if (!cargoRepository.existsById(request.cargoId())) {
+
+        if (request.cargoId() != null && !cargoRepository.existsById(request.cargoId())) {
             throw new ResourceNotFoundException("El cargo no existe.");
         }
 
+        // 3. Finalmente, guardamos
         User user = User.builder()
                 .email(request.email())
                 .password(passwordEncoder.encode(request.password()))

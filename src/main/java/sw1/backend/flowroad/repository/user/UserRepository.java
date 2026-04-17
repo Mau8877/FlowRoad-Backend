@@ -1,13 +1,13 @@
 package sw1.backend.flowroad.repository.user;
 
+import java.util.List;
+import java.util.Optional;
+
 import org.springframework.data.mongodb.repository.MongoRepository;
 import org.springframework.stereotype.Repository;
 
 import sw1.backend.flowroad.models.user.Roles;
 import sw1.backend.flowroad.models.user.User;
-
-import java.util.List;
-import java.util.Optional;
 
 @Repository
 public interface UserRepository extends MongoRepository<User, String> {
@@ -25,6 +25,8 @@ public interface UserRepository extends MongoRepository<User, String> {
         // Obtiene todos los usuarios activos de una organización específica (ej:
         // Nissan).
         List<User> findAllByOrgIdAndIsActiveTrue(String orgId);
+
+        List<User> findAllByOrgId(String orgId);
 
         // 4. EL MOTOR DEL ROUND ROBIN (Lógica de Tesis)
         // Busca al trabajador (WORKER) activo con la menor carga de trabajo (workload)

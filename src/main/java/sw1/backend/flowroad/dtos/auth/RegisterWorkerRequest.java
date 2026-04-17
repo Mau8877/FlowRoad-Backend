@@ -8,17 +8,16 @@ import sw1.backend.flowroad.dtos.user.UserProfileRequest;
 import sw1.backend.flowroad.models.user.Roles;
 
 public record RegisterWorkerRequest(
-                @NotBlank(message = "El email es obligatorio") @Email(message = "El formato del correo no es válido") String email,
+        @NotBlank(message = "El email es obligatorio") @Email(message = "El formato del correo no es válido") String email,
 
-                @NotBlank(message = "La contraseña temporal es obligatoria") String password,
+        @NotBlank(message = "La contraseña temporal es obligatoria") String password,
 
-                @NotNull(message = "El rol es obligatorio") Roles role,
+        @NotNull(message = "El rol es obligatorio") Roles role,
 
-                @NotBlank(message = "El orgId es obligatorio para trabajadores") String orgId,
+        @NotBlank(message = "El orgId es obligatorio para trabajadores") String orgId,
 
-                @NotBlank(message = "Debe asignar un departamento") String departmentId,
+        String departmentId,
+        String cargoId,
 
-                @NotBlank(message = "Debe asignar un cargo específico") String cargoId,
-
-                @NotNull(message = "Los datos del perfil son obligatorios") @Valid UserProfileRequest profile) {
+        @NotNull(message = "Los datos del perfil son obligatorios") @Valid UserProfileRequest profile) {
 }

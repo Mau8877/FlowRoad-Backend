@@ -1,22 +1,22 @@
 package sw1.backend.flowroad.services.user;
 
-import lombok.RequiredArgsConstructor;
+import java.util.List;
+import java.util.stream.Collectors;
+
 import org.springframework.stereotype.Service;
 
-import sw1.backend.flowroad.dtos.user.UserResponse;
+import lombok.RequiredArgsConstructor;
 import sw1.backend.flowroad.dtos.organization.CargoSummaryResponse;
 import sw1.backend.flowroad.dtos.organization.DepartmentSummaryResponse;
 import sw1.backend.flowroad.dtos.user.UpdateUserRequest;
 import sw1.backend.flowroad.dtos.user.UserProfileResponse;
-import sw1.backend.flowroad.models.user.User;
-import sw1.backend.flowroad.models.user.Roles;
-import sw1.backend.flowroad.repository.organization.DepartmentRepository;
-import sw1.backend.flowroad.repository.organization.CargoRepository;
-import sw1.backend.flowroad.repository.user.UserRepository;
+import sw1.backend.flowroad.dtos.user.UserResponse;
 import sw1.backend.flowroad.exceptions.ResourceNotFoundException;
-
-import java.util.List;
-import java.util.stream.Collectors;
+import sw1.backend.flowroad.models.user.Roles;
+import sw1.backend.flowroad.models.user.User;
+import sw1.backend.flowroad.repository.organization.CargoRepository;
+import sw1.backend.flowroad.repository.organization.DepartmentRepository;
+import sw1.backend.flowroad.repository.user.UserRepository;
 
 @Service
 @RequiredArgsConstructor
@@ -35,7 +35,7 @@ public class UserService {
 
     // 2. LISTAR USUARIOS DE UNA ORGANIZACIÓN
     public List<UserResponse> getByOrganization(String orgId) {
-        return userRepository.findAllByOrgIdAndIsActiveTrue(orgId)
+        return userRepository.findAllByOrgId(orgId)
                 .stream()
                 .map(this::convertToResponseDTO)
                 .collect(Collectors.toList());
