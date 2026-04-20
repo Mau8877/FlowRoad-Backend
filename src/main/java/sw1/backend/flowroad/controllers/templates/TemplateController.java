@@ -1,6 +1,7 @@
 package sw1.backend.flowroad.controllers.templates;
 
 import java.util.List;
+import java.util.Map;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -29,6 +30,14 @@ import sw1.backend.flowroad.services.templates.TemplateService;
 public class TemplateController {
 
     private final TemplateService templateService;
+
+    @GetMapping("/test")
+    public ResponseEntity<?> test(@AuthenticationPrincipal User user) {
+        return ResponseEntity.ok(Map.of(
+                "orgId", user.getOrgId(),
+                "userId", user.getId(),
+                "email", user.getUsername()));
+    }
 
     /**
      * 1. OBTENER TODAS LAS PLANTILLAS DE LA EMPRESA
