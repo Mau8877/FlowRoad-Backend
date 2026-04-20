@@ -23,28 +23,22 @@ public class DesignSession {
     @Id
     private String id;
 
-    // FK -> Referencia al Diagram.java
     @Indexed
     private String diagramId;
 
-    // Token de la "sala" (Ej: "WS-REQ-2026")
     @Indexed(unique = true)
     private String sessionToken;
 
-    // El estado base (JSON stringificado para cargar rápido)
     private String snapshot;
 
     private List<ActiveUser> activeUsers;
     private List<OperationLog> opsLog;
+    private List<CellLock> activeLocks;
 
     private LocalDateTime startedAt;
 
-    // TTL Index: Mongo destruye el documento en 1 hora (3600 seg) si nadie lo
-    // actualiza
     @Indexed(expireAfterSeconds = 3600)
     private LocalDateTime lastActivity;
-
-    // --- SUB-DOCUMENTOS ---
 
     @Data
     @Builder
@@ -53,7 +47,7 @@ public class DesignSession {
     public static class ActiveUser {
         private String userId;
         private String nombre;
-        private String color; // Ej: "#FF5733"
+        private String color;
         private CursorPosition cursor;
         private LocalDateTime lastPing;
     }
@@ -71,10 +65,21 @@ public class DesignSession {
     @NoArgsConstructor
     @AllArgsConstructor
     public static class OperationLog {
-        private String opType; // Ej: "MOVE", "RENAME"
-        private String nodeId;
-        private Map<String, Object> delta; // Solo lo que cambió {x: 10, y: 50}
+        private String opType;
+        private String cellId;
+        private Map<String, Object> delta;
         private String userId;
         private LocalDateTime timestamp;
+    }
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class CellLock {
+        private String cellId;
+        private String userId;
+        private String username;
+        private LocalDateTime lockedAt;
     }
 }

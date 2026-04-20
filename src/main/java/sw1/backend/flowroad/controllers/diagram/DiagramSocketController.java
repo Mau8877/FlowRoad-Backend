@@ -1,8 +1,11 @@
 package sw1.backend.flowroad.controllers.diagram;
 
+import java.util.HashMap;
+import java.util.Map;
+
 import org.springframework.messaging.handler.annotation.DestinationVariable;
 import org.springframework.messaging.handler.annotation.MessageMapping;
-import org.springframework.messaging.simp.SimpMessagingTemplate; // IMPORTANTE
+import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Controller;
 
 import lombok.RequiredArgsConstructor;
@@ -15,25 +18,67 @@ import sw1.backend.flowroad.services.diagram.DesignSessionService;
 public class DiagramSocketController {
 
     private final DesignSessionService sessionService;
-    private final SimpMessagingTemplate messagingTemplate; // El encargado de reenviar mensajes
+    private final SimpMessagingTemplate messagingTemplate;
 
     @MessageMapping("/session/{sessionToken}/operacion")
     public void registrarOperacion(
             @DestinationVariable String sessionToken,
             SocketOperationMessage message) {
 
+        String opType = message.getOpType();
+        String cellId = message.getCellId();
+        String userId = message.getUserId();
+
+        if ("LOCK_CELL".equals(opType)) {
+            boolean locked = sessionService.lockCell(sessionToken, cellId, userId);
+            if (locked) {
+                messagingTemplate.convertAndSend("/topic/session/" + sessionToken + "/cambios", message);
+            } else {
+                SocketOperationMessage rejectedMessage = new SocketOperationMessage();
+                rejectedMessage.setOpType("LOCK_REJECTED");
+                rejectedMessage.setCellId(cellId);
+                rejectedMessage.setUserId(userId);
+
+                Map<String, Object> delta = new HashMap<>();
+                delta.put("reason", "La celda ya está bloqueada por otro usuario.");
+                rejectedMessage.setDelta(delta);
+
+                messagingTemplate.convertAndSend("/topic/session/" + sessionToken + "/cambios", rejectedMessage);
+            }
+            return;
+        }
+
+        if ("UNLOCK_CELL".equals(opType)) {
+            boolean unlocked = sessionService.unlockCell(sessionToken, cellId, userId);
+            if (unlocked) {
+                messagingTemplate.convertAndSend("/topic/session/" + sessionToken + "/cambios", message);
+            }
+            return;
+        }
+
+        boolean requiresLock = "MOVE_LIVE".equals(opType) ||
+                "MOVE_COMMIT".equals(opType) ||
+                "UPDATE_NODE".equals(opType) ||
+                "DELETE_CELL".equals(opType) ||
+                "UPDATE_LINK".equals(opType) ||
+                "DELETE_LINK".equals(opType);
+
+        if (requiresLock) {
+            boolean allowed = sessionService.canOperateOnCell(sessionToken, cellId, userId);
+            if (!allowed) {
+                return;
+            }
+        }
+
         OperationLog op = OperationLog.builder()
-                .opType(message.getOpType())
-                .nodeId(message.getNodeId())
+                .opType(opType)
+                .cellId(cellId)
                 .delta(message.getDelta())
-                .userId(message.getUserId())
+                .userId(userId)
                 .build();
 
-        // 1. Guardamos en la base de datos (Atlas)
         sessionService.recordOperation(sessionToken, op);
 
-        // 2. RETRANSMISIÓN: Le avisamos a todos los que están en la sala
-        // para que Angular actualice el lienzo oficialmente.
         String destination = "/topic/session/" + sessionToken + "/cambios";
         messagingTemplate.convertAndSend(destination, message);
     }
@@ -43,16 +88,15 @@ public class DiagramSocketController {
             @DestinationVariable String sessionToken,
             SocketOperationMessage message) {
 
-        try {
-            double x = Double.parseDouble(message.getDelta().get("x").toString());
-            double y = Double.parseDouble(message.getDelta().get("y").toString());
-            sessionService.pingUser(sessionToken, message.getUserId(), x, y);
+        double x = Double.parseDouble(message.getDelta().get("x").toString());
+        double y = Double.parseDouble(message.getDelta().get("y").toString());
 
-            // Opcional: Reenviar el ping si quieres mostrar cursores en tiempo real
-            // messagingTemplate.convertAndSend("/topic/session/" + sessionToken +
-            // "/cambios", message);
-        } catch (Exception e) {
-            System.err.println("Error en ping: " + e.getMessage());
-        }
+        sessionService.pingUser(sessionToken, message.getUserId(), x, y);
+
+        message.setOpType("CURSOR");
+
+        messagingTemplate.convertAndSend(
+                "/topic/session/" + sessionToken + "/cambios",
+                message);
     }
 }

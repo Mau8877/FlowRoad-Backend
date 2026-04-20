@@ -2,7 +2,6 @@ package sw1.backend.flowroad.services.diagram;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -34,6 +33,7 @@ public class DesignSessionService {
 
         if (existingSession.isPresent()) {
             DesignSession session = existingSession.get();
+            ensureCollections(session);
             agregarUsuarioASesion(session, userId, username, color);
             return sessionRepository.save(session);
         }
@@ -56,6 +56,7 @@ public class DesignSessionService {
                 .snapshot(initialSnapshot)
                 .activeUsers(new ArrayList<>())
                 .opsLog(new ArrayList<>())
+                .activeLocks(new ArrayList<>())
                 .startedAt(LocalDateTime.now())
                 .lastActivity(LocalDateTime.now())
                 .build();
@@ -64,93 +65,291 @@ public class DesignSessionService {
         return sessionRepository.save(newSession);
     }
 
-    /**
-     * PASO 2: Registra la operación y SINCRONIZA el snapshot.
-     */
+    @Transactional
+    public boolean lockCell(String sessionToken, String cellId, String userId) {
+        DesignSession session = sessionRepository.findBySessionToken(sessionToken)
+                .orElseThrow(() -> new RuntimeException("Sesión caducada o inexistente"));
+
+        ensureCollections(session);
+
+        DesignSession.CellLock existingLock = session.getActiveLocks().stream()
+                .filter(lock -> lock.getCellId().equals(cellId))
+                .findFirst()
+                .orElse(null);
+
+        if (existingLock != null) {
+            if (existingLock.getUserId().equals(userId)) {
+                existingLock.setLockedAt(LocalDateTime.now());
+                session.setLastActivity(LocalDateTime.now());
+                sessionRepository.save(session);
+                return true;
+            }
+            return false;
+        }
+
+        String username = session.getActiveUsers().stream()
+                .filter(u -> u.getUserId().equals(userId))
+                .map(DesignSession.ActiveUser::getNombre)
+                .findFirst()
+                .orElse("Usuario");
+
+        DesignSession.CellLock newLock = DesignSession.CellLock.builder()
+                .cellId(cellId)
+                .userId(userId)
+                .username(username)
+                .lockedAt(LocalDateTime.now())
+                .build();
+
+        session.getActiveLocks().add(newLock);
+        session.setLastActivity(LocalDateTime.now());
+        sessionRepository.save(session);
+        return true;
+    }
+
+    @Transactional
+    public boolean unlockCell(String sessionToken, String cellId, String userId) {
+        DesignSession session = sessionRepository.findBySessionToken(sessionToken)
+                .orElseThrow(() -> new RuntimeException("Sesión caducada o inexistente"));
+
+        ensureCollections(session);
+
+        boolean removed = session.getActiveLocks()
+                .removeIf(lock -> lock.getCellId().equals(cellId) && lock.getUserId().equals(userId));
+
+        session.setLastActivity(LocalDateTime.now());
+        sessionRepository.save(session);
+        return removed;
+    }
+
+    public boolean canOperateOnCell(String sessionToken, String cellId, String userId) {
+        DesignSession session = sessionRepository.findBySessionToken(sessionToken)
+                .orElseThrow(() -> new RuntimeException("Sesión caducada o inexistente"));
+
+        ensureCollections(session);
+
+        DesignSession.CellLock existingLock = session.getActiveLocks().stream()
+                .filter(lock -> lock.getCellId().equals(cellId))
+                .findFirst()
+                .orElse(null);
+
+        if (existingLock == null) {
+            return false;
+        }
+
+        return existingLock.getUserId().equals(userId);
+    }
+
     public void recordOperation(String sessionToken, DesignSession.OperationLog operation) {
         DesignSession session = sessionRepository.findBySessionToken(sessionToken)
                 .orElseThrow(() -> new RuntimeException("Sesión caducada o inexistente"));
 
+        ensureCollections(session);
+
+        String opType = operation.getOpType();
+        session.setLastActivity(LocalDateTime.now());
+
+        if ("CURSOR".equals(opType) || "MOVE_LIVE".equals(opType)) {
+            sessionRepository.save(session);
+            return;
+        }
+
         operation.setTimestamp(LocalDateTime.now());
         session.getOpsLog().add(operation);
 
-        // Si es un movimiento, actualizamos el snapshot interno de la sesión
-        if ("MOVE".equals(operation.getOpType())) {
-            actualizarPosicionEnSnapshot(session, operation);
+        switch (opType) {
+            case "MOVE_COMMIT" -> actualizarPosicionEnSnapshot(session, operation);
+            case "CREATE_NODE", "CREATE_LINK" -> crearCeldaEnSnapshot(session, operation);
+            case "UPDATE_NODE", "UPDATE_LINK" -> actualizarCeldaEnSnapshot(session, operation);
+            case "DELETE_CELL", "DELETE_LINK" -> eliminarCeldaEnSnapshot(session, operation);
+            default -> {
+                // otras operaciones solo quedan en opsLog
+            }
         }
 
-        session.setLastActivity(LocalDateTime.now());
         sessionRepository.save(session);
     }
 
-    /**
-     * Maneja el JSON del snapshot de forma segura.
-     * Corregido: Acceso manual al Map de delta para evitar errores de tipo.
-     */
     private void actualizarPosicionEnSnapshot(DesignSession session, DesignSession.OperationLog op) {
         try {
-            // 1. Cargamos lo que tenemos (puede ser "[]")
-            List<Diagram.DiagramCell> cells = objectMapper.readValue(
-                    session.getSnapshot(),
-                    new TypeReference<List<Diagram.DiagramCell>>() {
-                    });
+            List<Diagram.DiagramCell> cells = readSnapshotCells(session);
 
-            Map<String, Object> delta = (Map<String, Object>) op.getDelta();
-            double newX = Double.parseDouble(delta.get("x").toString());
-            double newY = Double.parseDouble(delta.get("y").toString());
+            if (op.getDelta() == null) {
+                return;
+            }
 
-            // 2. Buscamos el nodo
+            Object xValue = op.getDelta().get("x");
+            Object yValue = op.getDelta().get("y");
+
+            if (xValue == null || yValue == null) {
+                return;
+            }
+
+            double newX = Double.parseDouble(xValue.toString());
+            double newY = Double.parseDouble(yValue.toString());
+
             Diagram.DiagramCell targetCell = cells.stream()
-                    .filter(c -> c.getId().equals(op.getNodeId()))
+                    .filter(c -> c.getId().equals(op.getCellId()))
                     .findFirst()
                     .orElse(null);
 
             if (targetCell != null) {
-                // Caso A: El nodo ya existía en el snapshot
-                if (targetCell.getPosition() == null)
+                if (targetCell.getPosition() == null) {
                     targetCell.setPosition(new Diagram.Position());
+                }
                 targetCell.getPosition().setX(newX);
                 targetCell.getPosition().setY(newY);
-            } else {
-                // Definimos atributos básicos para que JointJS no lo ignore
-                Map<String, Object> bodyAttrs = new HashMap<>();
-                bodyAttrs.put("fill", "#ffffff");
-                bodyAttrs.put("stroke", "#541f14");
-                bodyAttrs.put("strokeWidth", 2);
-                bodyAttrs.put("rx", 20);
-                bodyAttrs.put("ry", 20);
 
-                Map<String, Object> labelAttrs = new HashMap<>();
-                labelAttrs.put("text", "Nueva Actividad");
-                labelAttrs.put("fill", "#020304");
-
-                Map<String, Object> attrs = new HashMap<>();
-                attrs.put("body", bodyAttrs);
-                attrs.put("label", labelAttrs);
-
-                Diagram.DiagramCell newCell = Diagram.DiagramCell.builder()
-                        .id(op.getNodeId())
-                        .type("standard.Rectangle")
-                        .position(new Diagram.Position(newX, newY))
-                        .size(new Diagram.Size(160, 60))
-                        .attrs(attrs) // <--- ESTO ES LO QUE FALTABA
-                        .build();
-                cells.add(newCell);
-                System.out.println("🚀 Nodo '" + op.getNodeId() + "' agregado al snapshot por primera vez.");
+                writeSnapshotCells(session, cells);
             }
 
-            // 3. Guardamos el nuevo estado en Atlas
-            session.setSnapshot(objectMapper.writeValueAsString(cells));
+        } catch (Exception e) {
+            System.err.println("❌ Error sincronizando MOVE_COMMIT: " + e.getMessage());
+        }
+    }
+
+    private void crearCeldaEnSnapshot(DesignSession session, DesignSession.OperationLog op) {
+        try {
+            List<Diagram.DiagramCell> cells = readSnapshotCells(session);
+
+            if (op.getDelta() == null || !op.getDelta().containsKey("cell")) {
+                return;
+            }
+
+            Diagram.DiagramCell newCell = objectMapper.convertValue(
+                    op.getDelta().get("cell"),
+                    Diagram.DiagramCell.class);
+
+            if (newCell == null || newCell.getId() == null || newCell.getId().isBlank()) {
+                return;
+            }
+
+            boolean alreadyExists = cells.stream()
+                    .anyMatch(c -> c.getId().equals(newCell.getId()));
+
+            if (!alreadyExists) {
+                cells.add(newCell);
+                writeSnapshotCells(session, cells);
+            }
 
         } catch (Exception e) {
-            System.err.println("❌ Error sincronizando snapshot: " + e.getMessage());
+            System.err.println("❌ Error creando celda en snapshot: " + e.getMessage());
+        }
+    }
+
+    private void actualizarCeldaEnSnapshot(DesignSession session, DesignSession.OperationLog op) {
+        try {
+            List<Diagram.DiagramCell> cells = readSnapshotCells(session);
+
+            Diagram.DiagramCell targetCell = cells.stream()
+                    .filter(c -> c.getId().equals(op.getCellId()))
+                    .findFirst()
+                    .orElse(null);
+
+            if (targetCell == null || op.getDelta() == null) {
+                return;
+            }
+
+            Map<String, Object> delta = op.getDelta();
+
+            if (delta.containsKey("position") && delta.get("position") != null) {
+                Diagram.Position position = objectMapper.convertValue(
+                        delta.get("position"),
+                        Diagram.Position.class);
+                targetCell.setPosition(position);
+            }
+
+            if (delta.containsKey("size") && delta.get("size") != null) {
+                Diagram.Size size = objectMapper.convertValue(
+                        delta.get("size"),
+                        Diagram.Size.class);
+                targetCell.setSize(size);
+            }
+
+            if (delta.containsKey("source") && delta.get("source") != null) {
+                Diagram.CellReference source = objectMapper.convertValue(
+                        delta.get("source"),
+                        Diagram.CellReference.class);
+                targetCell.setSource(source);
+            }
+
+            if (delta.containsKey("target") && delta.get("target") != null) {
+                Diagram.CellReference target = objectMapper.convertValue(
+                        delta.get("target"),
+                        Diagram.CellReference.class);
+                targetCell.setTarget(target);
+            }
+
+            if (delta.containsKey("attrs")) {
+                Map<String, Object> attrs = objectMapper.convertValue(
+                        delta.get("attrs"),
+                        new TypeReference<Map<String, Object>>() {
+                        });
+                targetCell.setAttrs(attrs);
+            }
+
+            if (delta.containsKey("customData")) {
+                Map<String, Object> customData = objectMapper.convertValue(
+                        delta.get("customData"),
+                        new TypeReference<Map<String, Object>>() {
+                        });
+                targetCell.setCustomData(customData);
+            }
+
+            if (delta.containsKey("type") && delta.get("type") != null) {
+                targetCell.setType(delta.get("type").toString());
+            }
+
+            writeSnapshotCells(session, cells);
+
+        } catch (Exception e) {
+            System.err.println("❌ Error actualizando celda en snapshot: " + e.getMessage());
+        }
+    }
+
+    private void eliminarCeldaEnSnapshot(DesignSession session, DesignSession.OperationLog op) {
+        try {
+            List<Diagram.DiagramCell> cells = readSnapshotCells(session);
+
+            String cellId = op.getCellId();
+            if (cellId == null || cellId.isBlank()) {
+                return;
+            }
+
+            Diagram.DiagramCell targetCell = cells.stream()
+                    .filter(c -> cellId.equals(c.getId()))
+                    .findFirst()
+                    .orElse(null);
+
+            if (targetCell == null) {
+                return;
+            }
+
+            boolean isNode = !"standard.Link".equals(targetCell.getType());
+
+            cells.removeIf(c -> cellId.equals(c.getId()));
+
+            if (isNode) {
+                cells.removeIf(c -> ("standard.Link".equals(c.getType())) &&
+                        ((c.getSource() != null && cellId.equals(c.getSource().getId())) ||
+                                (c.getTarget() != null && cellId.equals(c.getTarget().getId()))));
+            }
+
+            session.getActiveLocks().removeIf(lock -> cellId.equals(lock.getCellId()));
+
+            writeSnapshotCells(session, cells);
+
+        } catch (Exception e) {
+            System.err.println("❌ Error eliminando celda del snapshot: " + e.getMessage());
         }
     }
 
     public void pingUser(String sessionToken, String userId, double cursorX, double cursorY) {
         DesignSession session = sessionRepository.findBySessionToken(sessionToken).orElse(null);
-        if (session == null)
+        if (session == null) {
             return;
+        }
+
+        ensureCollections(session);
 
         session.getActiveUsers().stream()
                 .filter(u -> u.getUserId().equals(userId))
@@ -178,10 +377,14 @@ public class DesignSessionService {
         List<DesignSession> allSessions = sessionRepository.findAll();
 
         for (DesignSession session : allSessions) {
+            ensureCollections(session);
+
             boolean removed = session.getActiveUsers()
                     .removeIf(u -> u.getUserId().equals(realUserId));
 
             if (removed) {
+                session.getActiveLocks().removeIf(lock -> lock.getUserId().equals(realUserId));
+
                 if (session.getActiveUsers().isEmpty()) {
                     saveSnapshotToDiagram(session, null);
                     sessionRepository.delete(session);
@@ -194,14 +397,12 @@ public class DesignSessionService {
         }
     }
 
-    /**
-     * Persistencia final: Guarda el snapshot de la sesión en el Diagrama real.
-     */
     private void saveSnapshotToDiagram(DesignSession session, String optionalJson) {
         try {
             Diagram diagram = diagramRepository.findById(session.getDiagramId()).orElse(null);
-            if (diagram == null)
+            if (diagram == null) {
                 return;
+            }
 
             String jsonToSave = (optionalJson != null) ? optionalJson : session.getSnapshot();
 
@@ -222,9 +423,11 @@ public class DesignSessionService {
     @Transactional
     public void cleanupEmptySessions() {
         List<DesignSession> sessions = sessionRepository.findAll();
-        LocalDateTime limit = LocalDateTime.now().minusMinutes(5); // Aumentamos a 5 min para ser menos agresivos
+        LocalDateTime limit = LocalDateTime.now().minusMinutes(5);
 
         for (DesignSession session : sessions) {
+            ensureCollections(session);
+
             if (session.getLastActivity().isBefore(limit) || session.getActiveUsers().isEmpty()) {
                 saveSnapshotToDiagram(session, null);
                 sessionRepository.delete(session);
@@ -233,6 +436,8 @@ public class DesignSessionService {
     }
 
     private void agregarUsuarioASesion(DesignSession session, String userId, String username, String color) {
+        ensureCollections(session);
+
         boolean alreadyIn = session.getActiveUsers().stream()
                 .anyMatch(u -> u.getUserId().equals(userId));
 
@@ -245,5 +450,33 @@ public class DesignSessionService {
                     .build();
             session.getActiveUsers().add(newUser);
         }
+    }
+
+    private void ensureCollections(DesignSession session) {
+        if (session.getActiveUsers() == null) {
+            session.setActiveUsers(new ArrayList<>());
+        }
+        if (session.getOpsLog() == null) {
+            session.setOpsLog(new ArrayList<>());
+        }
+        if (session.getActiveLocks() == null) {
+            session.setActiveLocks(new ArrayList<>());
+        }
+    }
+
+    private List<Diagram.DiagramCell> readSnapshotCells(DesignSession session) throws Exception {
+        String snapshot = session.getSnapshot();
+        if (snapshot == null || snapshot.isBlank()) {
+            return new ArrayList<>();
+        }
+
+        return objectMapper.readValue(
+                snapshot,
+                new TypeReference<List<Diagram.DiagramCell>>() {
+                });
+    }
+
+    private void writeSnapshotCells(DesignSession session, List<Diagram.DiagramCell> cells) throws Exception {
+        session.setSnapshot(objectMapper.writeValueAsString(cells));
     }
 }

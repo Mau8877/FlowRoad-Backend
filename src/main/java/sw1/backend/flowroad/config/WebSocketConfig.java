@@ -1,5 +1,7 @@
 package sw1.backend.flowroad.config;
 
+import java.util.Map;
+
 import org.springframework.context.annotation.Configuration;
 import org.springframework.messaging.Message;
 import org.springframework.messaging.MessageChannel;
@@ -17,6 +19,7 @@ import org.springframework.web.socket.config.annotation.StompEndpointRegistry;
 import org.springframework.web.socket.config.annotation.WebSocketMessageBrokerConfigurer;
 
 import lombok.RequiredArgsConstructor;
+import sw1.backend.flowroad.models.user.User;
 import sw1.backend.flowroad.security.JwtService;
 
 @Configuration
@@ -27,10 +30,6 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
     private final JwtService jwtService;
     private final UserDetailsService userDetailsService;
 
-    /**
-     * Este método intercepta los mensajes que entran antes de llegar al Controller.
-     * Es vital para capturar el Token durante el comando CONNECT de STOMP.
-     */
     @Override
     public void configureClientInboundChannel(ChannelRegistration registration) {
         registration.interceptors(new ChannelInterceptor() {
@@ -38,13 +37,12 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
             public Message<?> preSend(Message<?> message, MessageChannel channel) {
                 StompHeaderAccessor accessor = MessageHeaderAccessor.getAccessor(message, StompHeaderAccessor.class);
 
-                // Solo actuamos si el cliente está intentando conectar
                 if (accessor != null && StompCommand.CONNECT.equals(accessor.getCommand())) {
-                    // Extraemos el header "Authorization" que mandamos desde Angular
                     String authHeader = accessor.getFirstNativeHeader("Authorization");
 
                     if (authHeader != null && authHeader.startsWith("Bearer ")) {
                         String jwt = authHeader.substring(7);
+
                         try {
                             String userEmail = jwtService.extractUsername(jwt);
 
@@ -53,11 +51,21 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
 
                                 if (jwtService.isTokenValid(jwt, userDetails)) {
                                     UsernamePasswordAuthenticationToken auth = new UsernamePasswordAuthenticationToken(
-                                            userDetails, null, userDetails.getAuthorities());
+                                            userDetails,
+                                            null,
+                                            userDetails.getAuthorities());
 
-                                    // ¡ESTO ES LO MÁS IMPORTANTE!
-                                    // Vinculamos al usuario con la sesión del WebSocket.
                                     accessor.setUser(auth);
+
+                                    Map<String, Object> sessionAttributes = accessor.getSessionAttributes();
+                                    if (sessionAttributes != null) {
+                                        sessionAttributes.put("userEmail", userEmail);
+
+                                        if (userDetails instanceof User user) {
+                                            sessionAttributes.put("userId", user.getId());
+                                            sessionAttributes.put("username", user.getUsername());
+                                        }
+                                    }
                                 }
                             }
                         } catch (Exception e) {
@@ -65,6 +73,7 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
                         }
                     }
                 }
+
                 return message;
             }
         });
@@ -72,18 +81,14 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
 
     @Override
     public void configureMessageBroker(MessageBrokerRegistry config) {
-        // Los mensajes que el servidor envía a los clientes (vía rápida)
         config.enableSimpleBroker("/topic");
-
-        // Prefijo para los mensajes que van del cliente al servidor (@MessageMapping)
         config.setApplicationDestinationPrefixes("/app");
     }
 
     @Override
     public void registerStompEndpoints(StompEndpointRegistry registry) {
         registry.addEndpoint("/ws-flowroad")
-                // Permitimos el origen de tu Angular
                 .setAllowedOriginPatterns("http://localhost:4200", "http://127.0.0.1:4200")
-                .withSockJS(); // Soporte para navegadores antiguos y estabilidad
+                .withSockJS();
     }
 }
