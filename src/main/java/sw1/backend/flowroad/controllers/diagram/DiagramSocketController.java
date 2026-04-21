@@ -9,12 +9,14 @@ import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Controller;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import sw1.backend.flowroad.dtos.diagram.SocketOperationMessage;
 import sw1.backend.flowroad.models.diagram.DesignSession.OperationLog;
 import sw1.backend.flowroad.services.diagram.DesignSessionService;
 
 @Controller
 @RequiredArgsConstructor
+@Slf4j
 public class DiagramSocketController {
 
     private final DesignSessionService sessionService;
@@ -28,9 +30,16 @@ public class DiagramSocketController {
         String opType = message.getOpType();
         String cellId = message.getCellId();
         String userId = message.getUserId();
+        String dragId = message.getDragId();
+
+        log.info("[WS][RECV] session={} opType={} cellId={} userId={} dragId={}",
+                sessionToken, opType, cellId, userId, dragId);
 
         if ("LOCK_CELL".equals(opType)) {
-            boolean locked = sessionService.lockCell(sessionToken, cellId, userId);
+            boolean locked = sessionService.lockCell(sessionToken, cellId, userId, dragId);
+            log.info("[WS][LOCK_RESULT] cellId={} userId={} dragId={} locked={}",
+                    cellId, userId, dragId, locked);
+
             if (locked) {
                 messagingTemplate.convertAndSend("/topic/session/" + sessionToken + "/cambios", message);
             } else {
@@ -38,9 +47,10 @@ public class DiagramSocketController {
                 rejectedMessage.setOpType("LOCK_REJECTED");
                 rejectedMessage.setCellId(cellId);
                 rejectedMessage.setUserId(userId);
+                rejectedMessage.setDragId(dragId);
 
                 Map<String, Object> delta = new HashMap<>();
-                delta.put("reason", "La celda ya está bloqueada por otro usuario.");
+                delta.put("reason", "La celda ya está bloqueada por otro usuario o drag distinto.");
                 rejectedMessage.setDelta(delta);
 
                 messagingTemplate.convertAndSend("/topic/session/" + sessionToken + "/cambios", rejectedMessage);
@@ -49,7 +59,10 @@ public class DiagramSocketController {
         }
 
         if ("UNLOCK_CELL".equals(opType)) {
-            boolean unlocked = sessionService.unlockCell(sessionToken, cellId, userId);
+            boolean unlocked = sessionService.unlockCell(sessionToken, cellId, userId, dragId);
+            log.info("[WS][UNLOCK_RESULT] cellId={} userId={} dragId={} unlocked={}",
+                    cellId, userId, dragId, unlocked);
+
             if (unlocked) {
                 messagingTemplate.convertAndSend("/topic/session/" + sessionToken + "/cambios", message);
             }
@@ -64,7 +77,10 @@ public class DiagramSocketController {
                 "DELETE_LINK".equals(opType);
 
         if (requiresLock) {
-            boolean allowed = sessionService.canOperateOnCell(sessionToken, cellId, userId);
+            boolean allowed = sessionService.canOperateOnCell(sessionToken, cellId, userId, dragId);
+            log.info("[WS][LOCK_CHECK] opType={} cellId={} userId={} dragId={} allowed={}",
+                    opType, cellId, userId, dragId, allowed);
+
             if (!allowed) {
                 return;
             }
@@ -75,12 +91,32 @@ public class DiagramSocketController {
                 .cellId(cellId)
                 .delta(message.getDelta())
                 .userId(userId)
+                .dragId(dragId)
                 .build();
 
         sessionService.recordOperation(sessionToken, op);
 
         String destination = "/topic/session/" + sessionToken + "/cambios";
         messagingTemplate.convertAndSend(destination, message);
+        log.info("[WS][BROADCAST] opType={} cellId={} userId={} dragId={}",
+                opType, cellId, userId, dragId);
+
+        if ("MOVE_COMMIT".equals(opType)) {
+            boolean unlocked = sessionService.unlockCell(sessionToken, cellId, userId, dragId);
+            log.info("[WS][AUTO_UNLOCK_AFTER_COMMIT] cellId={} userId={} dragId={} unlocked={}",
+                    cellId, userId, dragId, unlocked);
+
+            SocketOperationMessage unlockMessage = new SocketOperationMessage();
+            unlockMessage.setOpType("UNLOCK_CELL");
+            unlockMessage.setCellId(cellId);
+            unlockMessage.setUserId(userId);
+            unlockMessage.setDragId(dragId);
+            unlockMessage.setDelta(new HashMap<>());
+
+            messagingTemplate.convertAndSend(destination, unlockMessage);
+            log.info("[WS][BROADCAST_AUTO_UNLOCK] cellId={} userId={} dragId={}",
+                    cellId, userId, dragId);
+        }
     }
 
     @MessageMapping("/session/{sessionToken}/ping")

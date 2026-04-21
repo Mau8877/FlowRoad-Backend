@@ -38,4 +38,10 @@ public class SocketOperationMessage {
      * Usuario que emite la operación.
      */
     private String userId;
+
+    /**
+     * Identificador del drag actual.
+     * Sirve para distinguir mensajes viejos de arrastres nuevos.
+     */
+    private String dragId;
 }

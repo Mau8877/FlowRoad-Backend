@@ -23,6 +23,8 @@ import sw1.backend.flowroad.repository.diagram.DiagramRepository;
 @RequiredArgsConstructor
 public class DesignSessionService {
 
+    private static final long LOCK_TIMEOUT_SECONDS = 30L;
+
     private final DesignSessionRepository sessionRepository;
     private final DiagramRepository diagramRepository;
     private final ObjectMapper objectMapper;
@@ -34,6 +36,7 @@ public class DesignSessionService {
         if (existingSession.isPresent()) {
             DesignSession session = existingSession.get();
             ensureCollections(session);
+            pruneExpiredLocks(session);
             agregarUsuarioASesion(session, userId, username, color);
             return sessionRepository.save(session);
         }
@@ -66,11 +69,12 @@ public class DesignSessionService {
     }
 
     @Transactional
-    public boolean lockCell(String sessionToken, String cellId, String userId) {
+    public boolean lockCell(String sessionToken, String cellId, String userId, String dragId) {
         DesignSession session = sessionRepository.findBySessionToken(sessionToken)
                 .orElseThrow(() -> new RuntimeException("Sesión caducada o inexistente"));
 
         ensureCollections(session);
+        pruneExpiredLocks(session);
 
         DesignSession.CellLock existingLock = session.getActiveLocks().stream()
                 .filter(lock -> lock.getCellId().equals(cellId))
@@ -80,6 +84,7 @@ public class DesignSessionService {
         if (existingLock != null) {
             if (existingLock.getUserId().equals(userId)) {
                 existingLock.setLockedAt(LocalDateTime.now());
+                existingLock.setDragId(dragId);
                 session.setLastActivity(LocalDateTime.now());
                 sessionRepository.save(session);
                 return true;
@@ -97,6 +102,7 @@ public class DesignSessionService {
                 .cellId(cellId)
                 .userId(userId)
                 .username(username)
+                .dragId(dragId)
                 .lockedAt(LocalDateTime.now())
                 .build();
 
@@ -107,25 +113,28 @@ public class DesignSessionService {
     }
 
     @Transactional
-    public boolean unlockCell(String sessionToken, String cellId, String userId) {
+    public boolean unlockCell(String sessionToken, String cellId, String userId, String dragId) {
         DesignSession session = sessionRepository.findBySessionToken(sessionToken)
                 .orElseThrow(() -> new RuntimeException("Sesión caducada o inexistente"));
 
         ensureCollections(session);
 
-        boolean removed = session.getActiveLocks()
-                .removeIf(lock -> lock.getCellId().equals(cellId) && lock.getUserId().equals(userId));
+        boolean removed = session.getActiveLocks().removeIf(lock -> lock.getCellId().equals(cellId)
+                && lock.getUserId().equals(userId)
+                && ((dragId == null && lock.getDragId() == null)
+                        || (dragId != null && dragId.equals(lock.getDragId()))));
 
         session.setLastActivity(LocalDateTime.now());
         sessionRepository.save(session);
         return removed;
     }
 
-    public boolean canOperateOnCell(String sessionToken, String cellId, String userId) {
+    public boolean canOperateOnCell(String sessionToken, String cellId, String userId, String dragId) {
         DesignSession session = sessionRepository.findBySessionToken(sessionToken)
                 .orElseThrow(() -> new RuntimeException("Sesión caducada o inexistente"));
 
         ensureCollections(session);
+        pruneExpiredLocks(session);
 
         DesignSession.CellLock existingLock = session.getActiveLocks().stream()
                 .filter(lock -> lock.getCellId().equals(cellId))
@@ -136,7 +145,41 @@ public class DesignSessionService {
             return false;
         }
 
-        return existingLock.getUserId().equals(userId);
+        if (!existingLock.getUserId().equals(userId)) {
+            return false;
+        }
+
+        if (dragId == null || existingLock.getDragId() == null) {
+            return false;
+        }
+
+        return dragId.equals(existingLock.getDragId());
+    }
+
+    private void persistSessionSnapshotToDiagram(DesignSession session) {
+        try {
+            Diagram diagram = diagramRepository.findById(session.getDiagramId()).orElse(null);
+            if (diagram == null) {
+                return;
+            }
+
+            String snapshot = session.getSnapshot();
+            if (snapshot == null || snapshot.isBlank()) {
+                return;
+            }
+
+            List<Diagram.DiagramCell> cells = objectMapper.readValue(
+                    snapshot,
+                    new TypeReference<List<Diagram.DiagramCell>>() {
+                    });
+
+            diagram.setCells(cells);
+            diagram.setUpdatedAt(LocalDateTime.now());
+            diagramRepository.save(diagram);
+
+        } catch (Exception e) {
+            System.err.println("❌ Error persistiendo snapshot al diagrama oficial: " + e.getMessage());
+        }
     }
 
     public void recordOperation(String sessionToken, DesignSession.OperationLog operation) {
@@ -144,29 +187,48 @@ public class DesignSessionService {
                 .orElseThrow(() -> new RuntimeException("Sesión caducada o inexistente"));
 
         ensureCollections(session);
+        pruneExpiredLocks(session);
 
         String opType = operation.getOpType();
-        session.setLastActivity(LocalDateTime.now());
 
+        // MOVE_LIVE y CURSOR no deben persistir snapshot ni guardar la sesión,
+        // porque generan carreras entre hilos y pueden pisar locks.
         if ("CURSOR".equals(opType) || "MOVE_LIVE".equals(opType)) {
-            sessionRepository.save(session);
             return;
         }
 
+        session.setLastActivity(LocalDateTime.now());
         operation.setTimestamp(LocalDateTime.now());
         session.getOpsLog().add(operation);
 
+        boolean shouldPersistDiagram = false;
+
         switch (opType) {
-            case "MOVE_COMMIT" -> actualizarPosicionEnSnapshot(session, operation);
-            case "CREATE_NODE", "CREATE_LINK" -> crearCeldaEnSnapshot(session, operation);
-            case "UPDATE_NODE", "UPDATE_LINK" -> actualizarCeldaEnSnapshot(session, operation);
-            case "DELETE_CELL", "DELETE_LINK" -> eliminarCeldaEnSnapshot(session, operation);
+            case "MOVE_COMMIT" -> {
+                actualizarPosicionEnSnapshot(session, operation);
+                shouldPersistDiagram = true;
+            }
+            case "CREATE_NODE", "CREATE_LINK" -> {
+                crearCeldaEnSnapshot(session, operation);
+                shouldPersistDiagram = true;
+            }
+            case "UPDATE_NODE", "UPDATE_LINK" -> {
+                actualizarCeldaEnSnapshot(session, operation);
+                shouldPersistDiagram = true;
+            }
+            case "DELETE_CELL", "DELETE_LINK" -> {
+                eliminarCeldaEnSnapshot(session, operation);
+                shouldPersistDiagram = true;
+            }
             default -> {
-                // otras operaciones solo quedan en opsLog
             }
         }
 
         sessionRepository.save(session);
+
+        if (shouldPersistDiagram) {
+            persistSessionSnapshotToDiagram(session);
+        }
     }
 
     private void actualizarPosicionEnSnapshot(DesignSession session, DesignSession.OperationLog op) {
@@ -350,6 +412,7 @@ public class DesignSessionService {
         }
 
         ensureCollections(session);
+        pruneExpiredLocks(session);
 
         session.getActiveUsers().stream()
                 .filter(u -> u.getUserId().equals(userId))
@@ -378,6 +441,7 @@ public class DesignSessionService {
 
         for (DesignSession session : allSessions) {
             ensureCollections(session);
+            pruneExpiredLocks(session);
 
             boolean removed = session.getActiveUsers()
                     .removeIf(u -> u.getUserId().equals(realUserId));
@@ -427,10 +491,13 @@ public class DesignSessionService {
 
         for (DesignSession session : sessions) {
             ensureCollections(session);
+            pruneExpiredLocks(session);
 
             if (session.getLastActivity().isBefore(limit) || session.getActiveUsers().isEmpty()) {
                 saveSnapshotToDiagram(session, null);
                 sessionRepository.delete(session);
+            } else {
+                sessionRepository.save(session);
             }
         }
     }
@@ -462,6 +529,22 @@ public class DesignSessionService {
         if (session.getActiveLocks() == null) {
             session.setActiveLocks(new ArrayList<>());
         }
+    }
+
+    private void pruneExpiredLocks(DesignSession session) {
+        LocalDateTime cutoff = LocalDateTime.now().minusSeconds(LOCK_TIMEOUT_SECONDS);
+        session.getActiveLocks().removeIf(lock -> lock.getLockedAt() == null || lock.getLockedAt().isBefore(cutoff));
+    }
+
+    private void touchLock(DesignSession session, String cellId, String userId) {
+        if (cellId == null || userId == null) {
+            return;
+        }
+
+        session.getActiveLocks().stream()
+                .filter(lock -> cellId.equals(lock.getCellId()) && userId.equals(lock.getUserId()))
+                .findFirst()
+                .ifPresent(lock -> lock.setLockedAt(LocalDateTime.now()));
     }
 
     private List<Diagram.DiagramCell> readSnapshotCells(DesignSession session) throws Exception {

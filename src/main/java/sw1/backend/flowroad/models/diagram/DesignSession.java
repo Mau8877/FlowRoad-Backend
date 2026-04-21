@@ -69,6 +69,7 @@ public class DesignSession {
         private String cellId;
         private Map<String, Object> delta;
         private String userId;
+        private String dragId;
         private LocalDateTime timestamp;
     }
 
@@ -80,6 +81,7 @@ public class DesignSession {
         private String cellId;
         private String userId;
         private String username;
+        private String dragId;
         private LocalDateTime lockedAt;
     }
 }
