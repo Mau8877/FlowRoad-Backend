@@ -30,6 +30,9 @@ public class Diagram {
     // Aquí guardamos los elementos (nodos) y las flechas (enlaces)
     private List<DiagramCell> cells;
 
+    // Aquí se guardan los carriles
+    private List<DiagramLane> lanes;
+
     private LocalDateTime createdAt;
     private String createdBy;
     private LocalDateTime updatedAt;
@@ -82,5 +85,16 @@ public class Diagram {
     public static class CellReference {
         private String id; // ID del nodo al que se conecta
         private String port; // ID del puerto (Ej: "p-out")
+    }
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class DiagramLane {
+        private String id;
+        private String departmentId;
+        private String departmentName;
+        private Integer order;
     }
 }

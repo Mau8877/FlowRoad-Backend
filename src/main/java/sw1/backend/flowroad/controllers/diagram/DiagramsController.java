@@ -208,6 +208,21 @@ public class DiagramsController {
                 .body(diagramRepository.save(importedDiagram));
     }
 
+    @PutMapping("/{id}/lanes")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'DESIGNER')")
+    public ResponseEntity<Diagram> updateLanes(
+            @PathVariable String id,
+            @RequestBody Diagram request,
+            @AuthenticationPrincipal User currentUser) {
+
+        Diagram updated = diagramService.updateLanes(
+                id,
+                currentUser.getOrgId(),
+                request.getLanes());
+
+        return ResponseEntity.ok(updated);
+    }
+
     // =========================================================================
     // SECTION: HELPERS
     // =========================================================================

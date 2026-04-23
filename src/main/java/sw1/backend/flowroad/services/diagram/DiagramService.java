@@ -104,4 +104,18 @@ public class DiagramService {
 
         return diagramRepository.save(diagram);
     }
+
+    @Transactional
+    public Diagram updateLanes(String id, String orgId, List<Diagram.DiagramLane> lanes) {
+        Diagram diagram = getDiagramById(id, orgId);
+
+        if (lanes == null) {
+            throw new RuntimeException("La lista de lanes no puede ser nula.");
+        }
+
+        diagram.setLanes(lanes);
+        diagram.setUpdatedAt(LocalDateTime.now());
+
+        return diagramRepository.save(diagram);
+    }
 }
