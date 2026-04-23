@@ -6,7 +6,7 @@ import org.springframework.stereotype.Service;
 import sw1.backend.flowroad.dtos.organization.DepartmentResponse;
 import sw1.backend.flowroad.dtos.organization.CreateDepartmentRequest;
 import sw1.backend.flowroad.dtos.organization.UpdateDepartmentRequest;
-import sw1.backend.flowroad.dtos.organization.CargoSummaryResponse; // 👈 Asegúrate de importarlo
+import sw1.backend.flowroad.dtos.organization.CargoSummaryResponse;
 import sw1.backend.flowroad.models.organization.Department;
 import sw1.backend.flowroad.repository.organization.DepartmentRepository;
 import sw1.backend.flowroad.repository.organization.OrganizationRepository;

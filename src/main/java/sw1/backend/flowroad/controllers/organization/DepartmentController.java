@@ -6,11 +6,13 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 
 import sw1.backend.flowroad.dtos.organization.DepartmentResponse;
 import sw1.backend.flowroad.dtos.organization.CreateDepartmentRequest;
 import sw1.backend.flowroad.dtos.organization.UpdateDepartmentRequest;
 import sw1.backend.flowroad.services.organization.DepartmentService;
+import sw1.backend.flowroad.models.user.User;
 
 import java.util.List;
 
@@ -57,5 +59,12 @@ public class DepartmentController {
     public ResponseEntity<Void> delete(@PathVariable String id) {
         service.delete(id);
         return ResponseEntity.noContent().build();
+    }
+
+    @GetMapping("/my-organization")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'DESIGNER')")
+    public ResponseEntity<List<DepartmentResponse>> getMyOrganizationDepartments(
+            @AuthenticationPrincipal User currentUser) {
+        return ResponseEntity.ok(service.getByOrganization(currentUser.getOrgId()));
     }
 }
