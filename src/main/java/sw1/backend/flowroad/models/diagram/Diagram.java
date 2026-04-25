@@ -96,5 +96,9 @@ public class Diagram {
         private String departmentId;
         private String departmentName;
         private Integer order;
+        private Integer x;
+        private Integer y;
+        private Integer width;
+        private Integer height;
     }
 }

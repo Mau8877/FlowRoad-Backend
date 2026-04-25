@@ -21,16 +21,23 @@ public class SocketOperationMessage {
      * LOCK_CELL
      * UNLOCK_CELL
      * LOCK_REJECTED
+     * SYNC_LANES
      */
     private String opType;
 
     /**
      * ID general de la celda del diagrama.
+     * Para SYNC_LANES se puede usar "lanes".
      */
     private String cellId;
 
     /**
      * Datos variables de la operación.
+     * Para SYNC_LANES:
+     * {
+     * "lanes": [...],
+     * "cells": [...]
+     * }
      */
     private Map<String, Object> delta;
 

@@ -9,8 +9,9 @@ import sw1.backend.flowroad.models.diagram.DesignSession.ActiveUser;
 @Data
 @Builder
 public class JoinSessionResponse {
-    private String sessionToken; // El ticket para el WebSocket
+    private String sessionToken;
     private String diagramId;
-    private String snapshot; // El JSON inicial del diagrama
-    private List<ActiveUser> currentUsers; // Quiénes ya están adentro
+    private String snapshot;
+    private String lanesSnapshot;
+    private List<ActiveUser> currentUsers;
 }

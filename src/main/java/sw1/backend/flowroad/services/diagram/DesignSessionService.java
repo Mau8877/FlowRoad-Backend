@@ -38,6 +38,11 @@ public class DesignSessionService {
             ensureCollections(session);
             pruneExpiredLocks(session);
             agregarUsuarioASesion(session, userId, username, color);
+
+            if (session.getLanesSnapshot() == null || session.getLanesSnapshot().isBlank()) {
+                hydrateMissingLanesSnapshot(session);
+            }
+
             return sessionRepository.save(session);
         }
 
@@ -45,18 +50,24 @@ public class DesignSessionService {
                 .orElseThrow(() -> new RuntimeException("El diagrama no existe"));
 
         String initialSnapshot = "[]";
+        String initialLanesSnapshot = "[]";
+
         try {
             if (diagram.getCells() != null) {
                 initialSnapshot = objectMapper.writeValueAsString(diagram.getCells());
             }
+            if (diagram.getLanes() != null) {
+                initialLanesSnapshot = objectMapper.writeValueAsString(diagram.getLanes());
+            }
         } catch (Exception e) {
-            System.err.println("Error al serializar el snapshot inicial: " + e.getMessage());
+            System.err.println("Error al serializar snapshots iniciales: " + e.getMessage());
         }
 
         DesignSession newSession = DesignSession.builder()
                 .diagramId(diagramId)
                 .sessionToken("WS-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase())
                 .snapshot(initialSnapshot)
+                .lanesSnapshot(initialLanesSnapshot)
                 .activeUsers(new ArrayList<>())
                 .opsLog(new ArrayList<>())
                 .activeLocks(new ArrayList<>())
@@ -164,16 +175,23 @@ public class DesignSessionService {
             }
 
             String snapshot = session.getSnapshot();
-            if (snapshot == null || snapshot.isBlank()) {
-                return;
+            if (snapshot != null && !snapshot.isBlank()) {
+                List<Diagram.DiagramCell> cells = objectMapper.readValue(
+                        snapshot,
+                        new TypeReference<List<Diagram.DiagramCell>>() {
+                        });
+                diagram.setCells(cells);
             }
 
-            List<Diagram.DiagramCell> cells = objectMapper.readValue(
-                    snapshot,
-                    new TypeReference<List<Diagram.DiagramCell>>() {
-                    });
+            String lanesSnapshot = session.getLanesSnapshot();
+            if (lanesSnapshot != null && !lanesSnapshot.isBlank()) {
+                List<Diagram.DiagramLane> lanes = objectMapper.readValue(
+                        lanesSnapshot,
+                        new TypeReference<List<Diagram.DiagramLane>>() {
+                        });
+                diagram.setLanes(lanes);
+            }
 
-            diagram.setCells(cells);
             diagram.setUpdatedAt(LocalDateTime.now());
             diagramRepository.save(diagram);
 
@@ -191,8 +209,6 @@ public class DesignSessionService {
 
         String opType = operation.getOpType();
 
-        // MOVE_LIVE y CURSOR no deben persistir snapshot ni guardar la sesión,
-        // porque generan carreras entre hilos y pueden pisar locks.
         if ("CURSOR".equals(opType) || "MOVE_LIVE".equals(opType)) {
             return;
         }
@@ -218,6 +234,10 @@ public class DesignSessionService {
             }
             case "DELETE_CELL", "DELETE_LINK" -> {
                 eliminarCeldaEnSnapshot(session, operation);
+                shouldPersistDiagram = true;
+            }
+            case "SYNC_LANES" -> {
+                actualizarLanesEnSnapshot(session, operation);
                 shouldPersistDiagram = true;
             }
             default -> {
@@ -260,6 +280,15 @@ public class DesignSessionService {
                 }
                 targetCell.getPosition().setX(newX);
                 targetCell.getPosition().setY(newY);
+
+                if (op.getDelta().containsKey("laneId") && op.getDelta().get("laneId") != null) {
+                    Map<String, Object> customData = targetCell.getCustomData() != null
+                            ? targetCell.getCustomData()
+                            : new java.util.HashMap<>();
+
+                    customData.put("laneId", op.getDelta().get("laneId").toString());
+                    targetCell.setCustomData(customData);
+                }
 
                 writeSnapshotCells(session, cells);
             }
@@ -415,6 +444,35 @@ public class DesignSessionService {
         }
     }
 
+    private void actualizarLanesEnSnapshot(DesignSession session, DesignSession.OperationLog op) {
+        try {
+            if (op.getDelta() == null) {
+                return;
+            }
+
+            Object lanesValue = op.getDelta().get("lanes");
+            if (lanesValue != null) {
+                List<Diagram.DiagramLane> lanes = objectMapper.convertValue(
+                        lanesValue,
+                        new TypeReference<List<Diagram.DiagramLane>>() {
+                        });
+                writeSnapshotLanes(session, lanes);
+            }
+
+            Object cellsValue = op.getDelta().get("cells");
+            if (cellsValue != null) {
+                List<Diagram.DiagramCell> cells = objectMapper.convertValue(
+                        cellsValue,
+                        new TypeReference<List<Diagram.DiagramCell>>() {
+                        });
+                writeSnapshotCells(session, cells);
+            }
+
+        } catch (Exception e) {
+            System.err.println("❌ Error sincronizando lanes en snapshot: " + e.getMessage());
+        }
+    }
+
     public void pingUser(String sessionToken, String userId, double cursorX, double cursorY) {
         DesignSession session = sessionRepository.findBySessionToken(sessionToken).orElse(null);
         if (session == null) {
@@ -480,15 +538,25 @@ public class DesignSessionService {
 
             String jsonToSave = (optionalJson != null) ? optionalJson : session.getSnapshot();
 
-            if (jsonToSave != null && !jsonToSave.equals("[]")) {
+            if (jsonToSave != null && !jsonToSave.isBlank() && !jsonToSave.equals("[]")) {
                 List<Diagram.DiagramCell> cells = objectMapper.readValue(
                         jsonToSave,
                         new TypeReference<List<Diagram.DiagramCell>>() {
                         });
                 diagram.setCells(cells);
-                diagram.setUpdatedAt(LocalDateTime.now());
-                diagramRepository.save(diagram);
             }
+
+            String lanesJsonToSave = session.getLanesSnapshot();
+            if (lanesJsonToSave != null && !lanesJsonToSave.isBlank() && !lanesJsonToSave.equals("[]")) {
+                List<Diagram.DiagramLane> lanes = objectMapper.readValue(
+                        lanesJsonToSave,
+                        new TypeReference<List<Diagram.DiagramLane>>() {
+                        });
+                diagram.setLanes(lanes);
+            }
+
+            diagram.setUpdatedAt(LocalDateTime.now());
+            diagramRepository.save(diagram);
         } catch (Exception e) {
             System.err.println("❌ Falló el guardado final en el Diagrama: " + e.getMessage());
         }
@@ -539,6 +607,12 @@ public class DesignSessionService {
         if (session.getActiveLocks() == null) {
             session.setActiveLocks(new ArrayList<>());
         }
+        if (session.getSnapshot() == null || session.getSnapshot().isBlank()) {
+            session.setSnapshot("[]");
+        }
+        if (session.getLanesSnapshot() == null || session.getLanesSnapshot().isBlank()) {
+            session.setLanesSnapshot("[]");
+        }
     }
 
     private void pruneExpiredLocks(DesignSession session) {
@@ -546,15 +620,18 @@ public class DesignSessionService {
         session.getActiveLocks().removeIf(lock -> lock.getLockedAt() == null || lock.getLockedAt().isBefore(cutoff));
     }
 
-    private void touchLock(DesignSession session, String cellId, String userId) {
-        if (cellId == null || userId == null) {
-            return;
-        }
+    private void hydrateMissingLanesSnapshot(DesignSession session) {
+        try {
+            Diagram diagram = diagramRepository.findById(session.getDiagramId()).orElse(null);
+            if (diagram == null || diagram.getLanes() == null) {
+                session.setLanesSnapshot("[]");
+                return;
+            }
 
-        session.getActiveLocks().stream()
-                .filter(lock -> cellId.equals(lock.getCellId()) && userId.equals(lock.getUserId()))
-                .findFirst()
-                .ifPresent(lock -> lock.setLockedAt(LocalDateTime.now()));
+            session.setLanesSnapshot(objectMapper.writeValueAsString(diagram.getLanes()));
+        } catch (Exception e) {
+            session.setLanesSnapshot("[]");
+        }
     }
 
     @SuppressWarnings("unchecked")
@@ -602,5 +679,9 @@ public class DesignSessionService {
 
     private void writeSnapshotCells(DesignSession session, List<Diagram.DiagramCell> cells) throws Exception {
         session.setSnapshot(objectMapper.writeValueAsString(cells));
+    }
+
+    private void writeSnapshotLanes(DesignSession session, List<Diagram.DiagramLane> lanes) throws Exception {
+        session.setLanesSnapshot(objectMapper.writeValueAsString(lanes));
     }
 }

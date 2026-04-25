@@ -29,7 +29,15 @@ public class DesignSession {
     @Indexed(unique = true)
     private String sessionToken;
 
+    /**
+     * Snapshot colaborativo de las celdas.
+     */
     private String snapshot;
+
+    /**
+     * Snapshot colaborativo de las lanes.
+     */
+    private String lanesSnapshot;
 
     private List<ActiveUser> activeUsers;
     private List<OperationLog> opsLog;
