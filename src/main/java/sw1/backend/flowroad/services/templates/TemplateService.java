@@ -9,6 +9,7 @@ import org.springframework.stereotype.Service;
 import lombok.RequiredArgsConstructor;
 import sw1.backend.flowroad.dtos.templates.CreateTemplateRequest;
 import sw1.backend.flowroad.dtos.templates.TemplateResponse;
+import sw1.backend.flowroad.dtos.templates.TemplateSummaryResponse;
 import sw1.backend.flowroad.dtos.templates.UpdateTemplateRequest;
 import sw1.backend.flowroad.exceptions.ResourceNotFoundException;
 import sw1.backend.flowroad.models.organization.Department;
@@ -32,6 +33,14 @@ public class TemplateService {
                 .collect(Collectors.toList());
     }
 
+    // NUEVO: OBTENER RESUMEN DE PLANTILLAS ACTIVAS DE LA EMPRESA
+    public List<TemplateSummaryResponse> getSummaryByOrganization(String orgId) {
+        return repository.findAllByOrgIdAndIsActiveTrue(orgId)
+                .stream()
+                .map(this::convertToSummaryDTO)
+                .collect(Collectors.toList());
+    }
+
     // 2. OBTENER PLANTILLAS ACTIVAS POR DEPARTAMENTO (Para el menú del Trabajador)
     public List<TemplateResponse> getActiveByDepartment(String orgId, String departmentId) {
         return repository.findAllByOrgIdAndDepartmentIdAndIsActiveTrue(orgId, departmentId)
@@ -50,7 +59,6 @@ public class TemplateService {
 
     // 4. CREAR PLANTILLA (Inicia en Versión 1)
     public TemplateResponse create(CreateTemplateRequest request, String orgId, String createdBy) {
-        // Regla de Negocio: No permitir nombres duplicados en la misma organización
         if (repository.existsByOrgIdAndName(orgId, request.name())) {
             throw new IllegalArgumentException("Ya existe una plantilla con el nombre '" + request.name() + "'.");
         }
@@ -61,7 +69,7 @@ public class TemplateService {
                 .description(request.description())
                 .departmentId(request.departmentId())
                 .fields(request.fields())
-                .version(1) // 👈 Inicia siempre en versión 1
+                .version(1)
                 .isActive(true)
                 .createdAt(LocalDateTime.now())
                 .createdBy(createdBy)
@@ -71,13 +79,11 @@ public class TemplateService {
         return convertToResponseDTO(savedTemplate);
     }
 
-    // 5. ACTUALIZAR PLANTILLA (Autoincremento de Versión)
+    // 5. ACTUALIZAR PLANTILLA
     public TemplateResponse update(String id, UpdateTemplateRequest request, String orgId) {
         Template template = repository.findByIdAndOrgId(id, orgId)
                 .orElseThrow(() -> new ResourceNotFoundException("No se puede actualizar: Plantilla no encontrada."));
 
-        // Validar que si cambia el nombre, el nuevo nombre no esté siendo usado por
-        // OTRA plantilla
         if (!template.getName().equals(request.name()) && repository.existsByOrgIdAndName(orgId, request.name())) {
             throw new IllegalArgumentException("Ya existe otra plantilla con el nombre '" + request.name() + "'.");
         }
@@ -91,14 +97,13 @@ public class TemplateService {
             template.setIsActive(request.isActive());
         }
 
-        // 👈 MAGIA DE ARQUITECTURA: Subimos la versión automáticamente por cada edición
         template.setVersion(template.getVersion() + 1);
 
         Template updatedTemplate = repository.save(template);
         return convertToResponseDTO(updatedTemplate);
     }
 
-    // 6. SOFT DELETE (Desactivar)
+    // 6. SOFT DELETE
     public void softDelete(String id, String orgId) {
         Template template = repository.findByIdAndOrgId(id, orgId)
                 .orElseThrow(() -> new ResourceNotFoundException("No se puede desactivar: Plantilla no encontrada."));
@@ -119,6 +124,7 @@ public class TemplateService {
     }
 
     // --- MAPPERS ---
+
     private TemplateResponse convertToResponseDTO(Template template) {
         TemplateResponse dto = new TemplateResponse();
         dto.setId(template.getId());
@@ -137,5 +143,18 @@ public class TemplateService {
         dto.setCreatedAt(template.getCreatedAt());
         dto.setCreatedBy(template.getCreatedBy());
         return dto;
+    }
+
+    private TemplateSummaryResponse convertToSummaryDTO(Template template) {
+        String deptName = departmentRepository.findById(template.getDepartmentId())
+                .map(Department::getName)
+                .orElse("Sin Departamento");
+
+        return new TemplateSummaryResponse(
+                template.getId(),
+                template.getName(),
+                template.getDepartmentId(),
+                deptName,
+                template.getIsActive());
     }
 }

@@ -69,9 +69,9 @@ public class DiagramSocketController {
             return;
         }
 
+        // Solo las operaciones de drag/borrado duro requieren lock activo.
         boolean requiresLock = "MOVE_LIVE".equals(opType) ||
                 "MOVE_COMMIT".equals(opType) ||
-                "UPDATE_NODE".equals(opType) ||
                 "DELETE_CELL".equals(opType) ||
                 "UPDATE_LINK".equals(opType) ||
                 "DELETE_LINK".equals(opType);

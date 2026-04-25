@@ -20,6 +20,7 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import sw1.backend.flowroad.dtos.templates.CreateTemplateRequest;
 import sw1.backend.flowroad.dtos.templates.TemplateResponse;
+import sw1.backend.flowroad.dtos.templates.TemplateSummaryResponse;
 import sw1.backend.flowroad.dtos.templates.UpdateTemplateRequest;
 import sw1.backend.flowroad.models.user.User;
 import sw1.backend.flowroad.services.templates.TemplateService;
@@ -41,19 +42,26 @@ public class TemplateController {
 
     /**
      * 1. OBTENER TODAS LAS PLANTILLAS DE LA EMPRESA
-     * Ideal para la tabla principal donde el DESIGNER administra los formularios.
      */
     @GetMapping
     @PreAuthorize("hasAnyAuthority('ADMIN', 'DESIGNER')")
     public ResponseEntity<List<TemplateResponse>> getAllByOrganization(@AuthenticationPrincipal User currentUser) {
-        // Extraemos el orgId del Token JWT de forma segura
         return ResponseEntity.ok(templateService.getAllByOrganization(currentUser.getOrgId()));
     }
 
     /**
+     * NUEVO: OBTENER RESUMEN DE PLANTILLAS ACTIVAS DE MI EMPRESA
+     * Ideal para selects livianos en el editor de diagramas.
+     */
+    @GetMapping("/my-organization/summary")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'DESIGNER', 'WORKER')")
+    public ResponseEntity<List<TemplateSummaryResponse>> getSummaryByMyOrganization(
+            @AuthenticationPrincipal User currentUser) {
+        return ResponseEntity.ok(templateService.getSummaryByOrganization(currentUser.getOrgId()));
+    }
+
+    /**
      * 2. OBTENER PLANTILLAS ACTIVAS POR DEPARTAMENTO
-     * Lo usa Angular cuando un WORKER va a crear un reporte y necesita ver qué
-     * formularios usar.
      */
     @GetMapping("/department/{departmentId}")
     @PreAuthorize("hasAnyAuthority('ADMIN', 'DESIGNER', 'WORKER')")
@@ -65,8 +73,6 @@ public class TemplateController {
 
     /**
      * 3. OBTENER PLANTILLA POR ID
-     * Se usa para cargar la plantilla en modo "Edición" en Angular o para
-     * renderizarla.
      */
     @GetMapping("/{id}")
     @PreAuthorize("hasAnyAuthority('ADMIN', 'DESIGNER', 'WORKER')")
@@ -78,7 +84,6 @@ public class TemplateController {
 
     /**
      * 4. CREAR NUEVA PLANTILLA
-     * Registra automáticamente quién la creó y a qué organización pertenece.
      */
     @PostMapping
     @PreAuthorize("hasAnyAuthority('ADMIN', 'DESIGNER')")
@@ -89,13 +94,12 @@ public class TemplateController {
         TemplateResponse createdTemplate = templateService.create(
                 request,
                 currentUser.getOrgId(),
-                currentUser.getId() // El ID del usuario logueado es el creador
-        );
+                currentUser.getId());
         return ResponseEntity.status(HttpStatus.CREATED).body(createdTemplate);
     }
 
     /**
-     * 5. ACTUALIZAR PLANTILLA (Sube la versión a +1)
+     * 5. ACTUALIZAR PLANTILLA
      */
     @PutMapping("/{id}")
     @PreAuthorize("hasAnyAuthority('ADMIN', 'DESIGNER')")
@@ -107,8 +111,7 @@ public class TemplateController {
     }
 
     /**
-     * 6. ELIMINACIÓN LÓGICA (SOFT DELETE)
-     * La desactiva para que ya no aparezca en los menús de los trabajadores.
+     * 6. ELIMINACIÓN LÓGICA
      */
     @DeleteMapping("/{id}")
     @PreAuthorize("hasAnyAuthority('ADMIN', 'DESIGNER')")
@@ -121,7 +124,6 @@ public class TemplateController {
 
     /**
      * 7. REACTIVAR PLANTILLA
-     * La vuelve a activar para que aparezca en los menús de los trabajadores.
      */
     @PutMapping("/{id}/reactivate")
     @PreAuthorize("hasAnyAuthority('ADMIN', 'DESIGNER')")

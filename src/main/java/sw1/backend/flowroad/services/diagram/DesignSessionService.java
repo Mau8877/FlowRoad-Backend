@@ -341,20 +341,30 @@ public class DesignSessionService {
                 targetCell.setTarget(target);
             }
 
-            if (delta.containsKey("attrs")) {
-                Map<String, Object> attrs = objectMapper.convertValue(
+            if (delta.containsKey("attrs") && delta.get("attrs") != null) {
+                Map<String, Object> incomingAttrs = objectMapper.convertValue(
                         delta.get("attrs"),
                         new TypeReference<Map<String, Object>>() {
                         });
-                targetCell.setAttrs(attrs);
+
+                Map<String, Object> mergedAttrs = mergeMaps(
+                        targetCell.getAttrs(),
+                        incomingAttrs);
+
+                targetCell.setAttrs(mergedAttrs);
             }
 
-            if (delta.containsKey("customData")) {
-                Map<String, Object> customData = objectMapper.convertValue(
+            if (delta.containsKey("customData") && delta.get("customData") != null) {
+                Map<String, Object> incomingCustomData = objectMapper.convertValue(
                         delta.get("customData"),
                         new TypeReference<Map<String, Object>>() {
                         });
-                targetCell.setCustomData(customData);
+
+                Map<String, Object> mergedCustomData = mergeMaps(
+                        targetCell.getCustomData(),
+                        incomingCustomData);
+
+                targetCell.setCustomData(mergedCustomData);
             }
 
             if (delta.containsKey("type") && delta.get("type") != null) {
@@ -545,6 +555,37 @@ public class DesignSessionService {
                 .filter(lock -> cellId.equals(lock.getCellId()) && userId.equals(lock.getUserId()))
                 .findFirst()
                 .ifPresent(lock -> lock.setLockedAt(LocalDateTime.now()));
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> mergeMaps(Map<String, Object> base, Map<String, Object> incoming) {
+        Map<String, Object> result = new java.util.HashMap<>();
+
+        if (base != null) {
+            result.putAll(base);
+        }
+
+        if (incoming == null) {
+            return result;
+        }
+
+        for (Map.Entry<String, Object> entry : incoming.entrySet()) {
+            String key = entry.getKey();
+            Object incomingValue = entry.getValue();
+            Object baseValue = result.get(key);
+
+            if (baseValue instanceof Map && incomingValue instanceof Map) {
+                result.put(
+                        key,
+                        mergeMaps(
+                                (Map<String, Object>) baseValue,
+                                (Map<String, Object>) incomingValue));
+            } else {
+                result.put(key, incomingValue);
+            }
+        }
+
+        return result;
     }
 
     private List<Diagram.DiagramCell> readSnapshotCells(DesignSession session) throws Exception {
