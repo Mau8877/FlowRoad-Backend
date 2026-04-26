@@ -50,6 +50,7 @@ import sw1.backend.flowroad.repository.user.UserRepository;
 @Service
 @RequiredArgsConstructor
 public class ProcessInstanceService {
+    private static final int MAX_NODE_ACTIVATIONS = 5;
 
     private final ProcessInstanceRepository processInstanceRepository;
     private final ProcessAssignmentRepository processAssignmentRepository;
@@ -98,6 +99,7 @@ public class ProcessInstanceService {
                 .status(ProcessInstanceStatus.RUNNING)
                 .activeNodeIds(new ArrayList<>())
                 .completedNodeIds(new ArrayList<>(List.of(initialNode.getId())))
+                .nodeActivationCounts(new HashMap<>())
                 .requestData(requestData != null ? requestData : Map.of())
                 .startedByUserId(startedBy.getId())
                 .startedByUserName(getUserDisplayName(startedBy))
@@ -114,7 +116,7 @@ public class ProcessInstanceService {
 
         refreshProcessStatus(saved);
         ProcessInstance finalSaved = processInstanceRepository.save(saved);
-        processNotificationService.notifyProcessChanged(finalSaved, "PROCESS_CREATED");
+        processNotificationService.notifyProcessInstanceUpdated(finalSaved, "PROCESS_CREATED");
         return mapSummary(finalSaved);
     }
 
@@ -243,11 +245,35 @@ public class ProcessInstanceService {
 
         ProcessInstance savedInstance = processInstanceRepository.save(instance);
 
-        processNotificationService.notifyProcessChanged(
+        processNotificationService.notifyProcessInstanceUpdated(
                 savedInstance,
                 resolveProcessNotificationType(savedInstance));
 
         return getProcessInstanceDetail(savedInstance.getId(), currentUser.getOrgId(), false);
+    }
+
+    @Transactional
+    public ProcessInstanceSummaryResponse cancelProcessInstance(String processInstanceId, User currentUser) {
+        ProcessInstance instance = processInstanceRepository
+                .findByIdAndOrgId(processInstanceId, currentUser.getOrgId())
+                .orElseThrow(() -> new ResourceNotFoundException("Instancia de proceso no encontrada."));
+
+        if (instance.getStatus() == ProcessInstanceStatus.COMPLETED) {
+            throw new AuthException("Un proceso completado no puede cancelarse.");
+        }
+
+        if (instance.getStatus() == ProcessInstanceStatus.CANCELLED) {
+            throw new AuthException("La instancia de proceso ya fue cancelada.");
+        }
+
+        if (instance.getStatus() != ProcessInstanceStatus.RUNNING
+                && instance.getStatus() != ProcessInstanceStatus.PENDING_ASSIGNMENT) {
+            throw new AuthException("La instancia de proceso no se encuentra en un estado cancelable.");
+        }
+
+        ProcessInstance savedInstance = cancelInstanceInternal(instance, LocalDateTime.now());
+
+        return mapSummary(savedInstance);
     }
 
     private String resolveProcessNotificationType(ProcessInstance instance) {
@@ -277,6 +303,13 @@ public class ProcessInstanceService {
         }
 
         NodeType nodeType = getNodeType(node);
+
+        boolean alreadyHasPendingAssignmentForNode = nodeType == NodeType.TASK
+                && hasPendingAssignmentForNode(instance.getId(), nodeId);
+
+        if (!alreadyHasPendingAssignmentForNode) {
+            registerNodeActivation(instance, nodeId);
+        }
 
         if (nodeType == NodeType.FINAL) {
             markNodeCompleted(instance, nodeId);
@@ -343,11 +376,6 @@ public class ProcessInstanceService {
             instance.getActiveNodeIds().add(nodeId);
         }
 
-        boolean alreadyHasPendingAssignmentForNode = processAssignmentRepository
-                .findByProcessInstanceIdAndStatus(instance.getId(), ProcessAssignmentStatus.PENDING)
-                .stream()
-                .anyMatch(a -> nodeId.equals(a.getNodeId()));
-
         if (!alreadyHasPendingAssignmentForNode) {
             assignNode(instance, node, runtime);
         }
@@ -360,10 +388,7 @@ public class ProcessInstanceService {
             Diagram.DiagramCell node,
             DiagramRuntime runtime) {
 
-        boolean alreadyHasPendingAssignmentForNode = processAssignmentRepository
-                .findByProcessInstanceIdAndStatus(instance.getId(), ProcessAssignmentStatus.PENDING)
-                .stream()
-                .anyMatch(a -> node.getId().equals(a.getNodeId()));
+        boolean alreadyHasPendingAssignmentForNode = hasPendingAssignmentForNode(instance.getId(), node.getId());
 
         if (alreadyHasPendingAssignmentForNode) {
             return;
@@ -430,6 +455,32 @@ public class ProcessInstanceService {
 
         instance.setStatus(ProcessInstanceStatus.RUNNING);
         instance.setUpdatedAt(LocalDateTime.now());
+    }
+
+    private boolean hasPendingAssignmentForNode(String processInstanceId, String nodeId) {
+        return processAssignmentRepository
+                .findByProcessInstanceIdAndStatus(processInstanceId, ProcessAssignmentStatus.PENDING)
+                .stream()
+                .anyMatch(a -> nodeId.equals(a.getNodeId()));
+    }
+
+    private void registerNodeActivation(ProcessInstance instance, String nodeId) {
+        if (instance == null || nodeId == null || nodeId.isBlank()) {
+            return;
+        }
+
+        if (instance.getNodeActivationCounts() == null) {
+            instance.setNodeActivationCounts(new HashMap<>());
+        }
+
+        int currentCount = instance.getNodeActivationCounts().getOrDefault(nodeId, 0);
+        if (currentCount >= MAX_NODE_ACTIVATIONS) {
+            cancelInstanceInternal(instance, LocalDateTime.now());
+            throw new AuthException(
+                    "El proceso fue cancelado automáticamente por posible bucle infinito en el nodo: " + nodeId);
+        }
+
+        instance.getNodeActivationCounts().put(nodeId, currentCount + 1);
     }
 
     private Diagram.DiagramCell resolveDecisionTransition(
@@ -650,6 +701,34 @@ public class ProcessInstanceService {
             user.setWorkload(Math.max(0, current - 1));
             userRepository.save(user);
         });
+    }
+
+    private ProcessInstance cancelInstanceInternal(ProcessInstance instance, LocalDateTime now) {
+        List<ProcessAssignment> pendingAssignments = processAssignmentRepository
+                .findByProcessInstanceIdAndStatus(instance.getId(), ProcessAssignmentStatus.PENDING);
+
+        for (ProcessAssignment assignment : pendingAssignments) {
+            assignment.setStatus(ProcessAssignmentStatus.CANCELLED);
+
+            if (assignment.getCompletedAt() == null) {
+                assignment.setCompletedAt(now);
+            }
+
+            decrementUserWorkloadById(assignment.getAssignedUserId());
+        }
+
+        if (!pendingAssignments.isEmpty()) {
+            processAssignmentRepository.saveAll(pendingAssignments);
+        }
+
+        instance.setStatus(ProcessInstanceStatus.CANCELLED);
+        instance.setActiveNodeIds(new ArrayList<>());
+        instance.setUpdatedAt(now);
+        instance.setFinishedAt(now);
+
+        ProcessInstance savedInstance = processInstanceRepository.save(instance);
+        processNotificationService.notifyProcessInstanceUpdated(savedInstance, "PROCESS_CANCELLED");
+        return savedInstance;
     }
 
     private boolean canJoinAdvance(ProcessInstance instance, DiagramRuntime runtime, String joinNodeId) {

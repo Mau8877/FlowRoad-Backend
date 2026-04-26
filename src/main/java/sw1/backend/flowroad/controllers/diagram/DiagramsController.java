@@ -45,8 +45,9 @@ public class DiagramsController {
 
     @GetMapping("/debug")
     public ResponseEntity<?> debug(Authentication authentication) {
-        if (authentication == null)
+        if (authentication == null) {
             return ResponseEntity.status(401).body("No hay autenticación activa");
+        }
 
         Object principal = authentication.getPrincipal();
         Map<String, Object> response = new HashMap<>();
@@ -59,13 +60,16 @@ public class DiagramsController {
         } else {
             response.put("error", "El principal no es una instancia de la clase User");
         }
+
         return ResponseEntity.ok(response);
     }
 
     @GetMapping("/test")
     public ResponseEntity<?> test(@AuthenticationPrincipal User user) {
-        if (user == null)
+        if (user == null) {
             return ResponseEntity.status(401).body("Usuario nulo en SecurityContext");
+        }
+
         return ResponseEntity.ok(Map.of(
                 "orgId", user.getOrgId(),
                 "userId", user.getId(),
@@ -75,12 +79,14 @@ public class DiagramsController {
     @GetMapping("/debug-token")
     public ResponseEntity<?> debugToken(HttpServletRequest request) {
         String authHeader = request.getHeader("Authorization");
+
         if (authHeader == null || !authHeader.startsWith("Bearer ")) {
             return ResponseEntity.badRequest().body("Falta el Header de Authorization o no es Bearer");
         }
 
         String jwt = authHeader.substring(7);
         Map<String, Object> response = new HashMap<>();
+
         try {
             response.put("username", jwtService.extractUsername(jwt));
             response.put("userId", jwtService.extractUserId(jwt));
@@ -89,11 +95,12 @@ public class DiagramsController {
         } catch (Exception e) {
             response.put("error", "Error procesando token: " + e.getMessage());
         }
+
         return ResponseEntity.ok(response);
     }
 
     @GetMapping
-    @PreAuthorize("hasAnyAuthority('ADMIN', 'DESIGNER', 'RECEP')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'DESIGNER', 'RECEP', 'WORKER')")
     public ResponseEntity<List<DiagramSummaryResponse>> getAllByOrganization(
             @AuthenticationPrincipal User currentUser) {
 
@@ -126,7 +133,7 @@ public class DiagramsController {
     }
 
     @GetMapping("/{id}")
-    @PreAuthorize("hasAnyAuthority('ADMIN', 'DESIGNER', 'RECEP')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'DESIGNER', 'RECEP', 'WORKER')")
     public ResponseEntity<Diagram> getById(
             @PathVariable String id,
             @AuthenticationPrincipal User currentUser) {

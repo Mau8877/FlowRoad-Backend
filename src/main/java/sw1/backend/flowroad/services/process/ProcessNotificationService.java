@@ -64,7 +64,7 @@ public class ProcessNotificationService {
         });
     }
 
-    public void notifyProcessChanged(ProcessInstance instance, String type) {
+    public void notifyProcessInstanceUpdated(ProcessInstance instance, String type) {
         if (instance == null || instance.getOrgId() == null || instance.getOrgId().isBlank()) {
             log.warn("[PROCESS-WS] No se pudo notificar cambio de proceso porque no tiene orgId.");
             return;
@@ -92,6 +92,10 @@ public class ProcessNotificationService {
                     instance.getId(),
                     instance.getStatus());
         });
+    }
+
+    public void notifyProcessChanged(ProcessInstance instance, String type) {
+        notifyProcessInstanceUpdated(instance, type);
     }
 
     private void sendAfterCommit(Runnable action) {

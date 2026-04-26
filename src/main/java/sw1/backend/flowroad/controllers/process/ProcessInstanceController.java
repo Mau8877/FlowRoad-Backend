@@ -9,6 +9,7 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -70,6 +71,15 @@ public class ProcessInstanceController {
             @AuthenticationPrincipal User currentUser) {
         return ResponseEntity.ok(
                 processInstanceService.completeAssignment(id, assignmentId, request, currentUser));
+    }
+
+    @PutMapping("/{processInstanceId}/cancel")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'RECEP')")
+    public ResponseEntity<ProcessInstanceSummaryResponse> cancelProcessInstance(
+            @PathVariable String processInstanceId,
+            @AuthenticationPrincipal User currentUser) {
+        return ResponseEntity.ok(
+                processInstanceService.cancelProcessInstance(processInstanceId, currentUser));
     }
 
 }

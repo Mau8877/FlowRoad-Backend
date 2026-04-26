@@ -2,6 +2,7 @@ package sw1.backend.flowroad.models.process;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -36,6 +37,9 @@ public class ProcessInstance {
     @Builder.Default
     private List<String> completedNodeIds = new ArrayList<>();
 
+    @Builder.Default
+    private Map<String, Integer> nodeActivationCounts = new HashMap<>();
+
     private Map<String, Object> requestData;
 
     private String startedByUserId;
@@ -51,4 +55,3 @@ public class ProcessInstance {
         CANCELLED
     }
 }
-
