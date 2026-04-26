@@ -54,7 +54,7 @@ public class TemplateController {
      * Ideal para selects livianos en el editor de diagramas.
      */
     @GetMapping("/my-organization/summary")
-    @PreAuthorize("hasAnyAuthority('ADMIN', 'DESIGNER', 'WORKER')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'DESIGNER', 'WORKER', 'RECEP')")
     public ResponseEntity<List<TemplateSummaryResponse>> getSummaryByMyOrganization(
             @AuthenticationPrincipal User currentUser) {
         return ResponseEntity.ok(templateService.getSummaryByOrganization(currentUser.getOrgId()));
@@ -64,7 +64,7 @@ public class TemplateController {
      * 2. OBTENER PLANTILLAS ACTIVAS POR DEPARTAMENTO
      */
     @GetMapping("/department/{departmentId}")
-    @PreAuthorize("hasAnyAuthority('ADMIN', 'DESIGNER', 'WORKER')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'DESIGNER', 'WORKER', 'RECEP')")
     public ResponseEntity<List<TemplateResponse>> getActiveByDepartment(
             @PathVariable String departmentId,
             @AuthenticationPrincipal User currentUser) {
@@ -75,7 +75,7 @@ public class TemplateController {
      * 3. OBTENER PLANTILLA POR ID
      */
     @GetMapping("/{id}")
-    @PreAuthorize("hasAnyAuthority('ADMIN', 'DESIGNER', 'WORKER')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'DESIGNER', 'WORKER', 'RECEP')")
     public ResponseEntity<TemplateResponse> getById(
             @PathVariable String id,
             @AuthenticationPrincipal User currentUser) {

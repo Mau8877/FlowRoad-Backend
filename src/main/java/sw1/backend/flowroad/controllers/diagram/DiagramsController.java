@@ -93,7 +93,7 @@ public class DiagramsController {
     }
 
     @GetMapping
-    @PreAuthorize("hasAnyAuthority('ADMIN', 'DESIGNER')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'DESIGNER', 'RECEP')")
     public ResponseEntity<List<DiagramSummaryResponse>> getAllByOrganization(
             @AuthenticationPrincipal User currentUser) {
 
@@ -126,7 +126,7 @@ public class DiagramsController {
     }
 
     @GetMapping("/{id}")
-    @PreAuthorize("hasAnyAuthority('ADMIN', 'DESIGNER')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'DESIGNER', 'RECEP')")
     public ResponseEntity<Diagram> getById(
             @PathVariable String id,
             @AuthenticationPrincipal User currentUser) {
