@@ -58,9 +58,14 @@ public class Diagram {
         // Propiedades visuales (colores, texto) que maneja JointJS
         private Map<String, Object> attrs;
 
-        // ¡Clave! Aquí puedes guardar datos de negocio de FlowRoad (Ej: roles,
-        // validaciones)
+        // Datos adicionales del dominio / frontend
         private Map<String, Object> customData;
+
+        // Propiedades extra de links
+        private List<Map<String, Object>> labels;
+        private List<Map<String, Object>> vertices;
+        private Map<String, Object> router;
+        private Map<String, Object> connector;
     }
 
     @Data

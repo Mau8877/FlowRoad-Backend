@@ -5,7 +5,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
+import org.springframework.http.ContentDisposition;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
@@ -19,34 +22,27 @@ import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.multipart.MultipartFile;
 
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import sw1.backend.flowroad.dtos.diagram.DiagramSummaryResponse;
 import sw1.backend.flowroad.models.diagram.Diagram;
 import sw1.backend.flowroad.models.user.User;
-import sw1.backend.flowroad.repository.diagram.DiagramRepository;
 import sw1.backend.flowroad.security.JwtService;
 import sw1.backend.flowroad.services.diagram.DiagramService;
 
 @RestController
-@RequestMapping("/diagrams") // Mantenemos el estándar en plural
+@RequestMapping("/diagrams")
 @RequiredArgsConstructor
 @CrossOrigin(origins = "*")
 public class DiagramsController {
 
     private final DiagramService diagramService;
-    private final DiagramRepository diagramRepository;
-    private final JwtService jwtService; // Inyectado para que funcionen los debugs
+    private final JwtService jwtService;
 
-    // =========================================================================
-    // SECTION: DEBUGGING TOOLS (Para rastrear errores de Token/Usuario)
-    // =========================================================================
-
-    /**
-     * Revisa qué objeto está guardado en el Contexto de Seguridad de Spring.
-     */
     @GetMapping("/debug")
     public ResponseEntity<?> debug(Authentication authentication) {
         if (authentication == null)
@@ -66,9 +62,6 @@ public class DiagramsController {
         return ResponseEntity.ok(response);
     }
 
-    /**
-     * Test rápido para verificar si @AuthenticationPrincipal está inyectando bien.
-     */
     @GetMapping("/test")
     public ResponseEntity<?> test(@AuthenticationPrincipal User user) {
         if (user == null)
@@ -79,9 +72,6 @@ public class DiagramsController {
                 "email", user.getUsername()));
     }
 
-    /**
-     * Decodifica el Token manualmente para ver qué trae adentro.
-     */
     @GetMapping("/debug-token")
     public ResponseEntity<?> debugToken(HttpServletRequest request) {
         String authHeader = request.getHeader("Authorization");
@@ -102,13 +92,6 @@ public class DiagramsController {
         return ResponseEntity.ok(response);
     }
 
-    // =========================================================================
-    // SECTION: CORE DIAGRAM OPERATIONS (CRUD)
-    // =========================================================================
-
-    /**
-     * 1. OBTENER RESUMEN: Lista todos los diagramas de la organización del usuario.
-     */
     @GetMapping
     @PreAuthorize("hasAnyAuthority('ADMIN', 'DESIGNER')")
     public ResponseEntity<List<DiagramSummaryResponse>> getAllByOrganization(
@@ -121,9 +104,6 @@ public class DiagramsController {
                         .collect(Collectors.toList()));
     }
 
-    /**
-     * 2. CREAR: Genera un nuevo diagrama con nombre único basado en timestamp.
-     */
     @PostMapping
     @PreAuthorize("hasAnyAuthority('ADMIN', 'DESIGNER')")
     public ResponseEntity<DiagramSummaryResponse> create(
@@ -145,9 +125,6 @@ public class DiagramsController {
         return ResponseEntity.status(HttpStatus.CREATED).body(mapToSummary(created));
     }
 
-    /**
-     * 3. LECTURA: Obtiene el diagrama completo (incluyendo el JSON de las celdas).
-     */
     @GetMapping("/{id}")
     @PreAuthorize("hasAnyAuthority('ADMIN', 'DESIGNER')")
     public ResponseEntity<Diagram> getById(
@@ -158,9 +135,6 @@ public class DiagramsController {
                 diagramService.getDiagramById(id, currentUser.getOrgId()));
     }
 
-    /**
-     * 4. ACTUALIZAR: Modifica nombre y descripción.
-     */
     @PutMapping("/{id}")
     @PreAuthorize("hasAnyAuthority('ADMIN', 'DESIGNER')")
     public ResponseEntity<DiagramSummaryResponse> updateMetadata(
@@ -178,9 +152,6 @@ public class DiagramsController {
         return ResponseEntity.ok(mapToSummary(updated));
     }
 
-    /**
-     * 5. ESTADO: Activa o desactiva (borrado lógico) un diagrama.
-     */
     @DeleteMapping("/{id}")
     @PreAuthorize("hasAnyAuthority('ADMIN', 'DESIGNER')")
     public ResponseEntity<Void> toggleActive(
@@ -189,23 +160,6 @@ public class DiagramsController {
 
         diagramService.toggleActiveStatus(id, currentUser.getOrgId());
         return ResponseEntity.noContent().build();
-    }
-
-    /**
-     * 6. IMPORTAR: Crea un diagrama a partir de un archivo .flowroad (JSON).
-     */
-    @PostMapping("/import")
-    @PreAuthorize("hasAnyAuthority('ADMIN', 'DESIGNER')")
-    public ResponseEntity<Diagram> importDiagram(
-            @RequestBody Diagram importedDiagram,
-            @AuthenticationPrincipal User currentUser) {
-
-        importedDiagram.setId(null); // Forzamos creación de nuevo ID en Mongo
-        importedDiagram.setOrgId(currentUser.getOrgId());
-        importedDiagram.setCreatedAt(java.time.LocalDateTime.now());
-
-        return ResponseEntity.status(HttpStatus.CREATED)
-                .body(diagramRepository.save(importedDiagram));
     }
 
     @PutMapping("/{id}/lanes")
@@ -223,13 +177,34 @@ public class DiagramsController {
         return ResponseEntity.ok(updated);
     }
 
-    // =========================================================================
-    // SECTION: HELPERS
-    // =========================================================================
+    @GetMapping("/{id}/export")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'DESIGNER')")
+    public ResponseEntity<byte[]> exportDiagram(
+            @PathVariable String id,
+            @AuthenticationPrincipal User currentUser) {
 
-    /**
-     * Convierte la entidad Diagram en un DTO ligero para las tablas.
-     */
+        Diagram diagram = diagramService.getDiagramById(id, currentUser.getOrgId());
+        byte[] fileContent = diagramService.exportDiagramAsFlowroad(id, currentUser.getOrgId());
+        String filename = diagramService.buildExportFilename(diagram.getName());
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_OCTET_STREAM);
+        headers.setContentDisposition(ContentDisposition.attachment().filename(filename).build());
+
+        return new ResponseEntity<>(fileContent, headers, HttpStatus.OK);
+    }
+
+    @PostMapping(value = "/{id}/import", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'DESIGNER')")
+    public ResponseEntity<Diagram> importIntoCurrentDiagram(
+            @PathVariable String id,
+            @RequestPart("file") MultipartFile file,
+            @AuthenticationPrincipal User currentUser) {
+
+        Diagram updated = diagramService.importIntoExistingDiagram(id, currentUser.getOrgId(), file);
+        return ResponseEntity.ok(updated);
+    }
+
     private DiagramSummaryResponse mapToSummary(Diagram diagram) {
         return DiagramSummaryResponse.builder()
                 .id(diagram.getId())

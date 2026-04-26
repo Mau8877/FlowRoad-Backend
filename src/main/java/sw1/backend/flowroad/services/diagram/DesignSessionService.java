@@ -370,6 +370,43 @@ public class DesignSessionService {
                 targetCell.setTarget(target);
             }
 
+            if (delta.containsKey("labels")) {
+                Object labelsRaw = delta.get("labels");
+                if (labelsRaw == null) {
+                    targetCell.setLabels(new ArrayList<>());
+                } else {
+                    List<Map<String, Object>> labels = objectMapper.convertValue(
+                            labelsRaw,
+                            new TypeReference<List<Map<String, Object>>>() {
+                            });
+                    targetCell.setLabels(labels);
+                }
+            }
+
+            if (delta.containsKey("vertices") && delta.get("vertices") != null) {
+                List<Map<String, Object>> vertices = objectMapper.convertValue(
+                        delta.get("vertices"),
+                        new TypeReference<List<Map<String, Object>>>() {
+                        });
+                targetCell.setVertices(vertices);
+            }
+
+            if (delta.containsKey("router") && delta.get("router") != null) {
+                Map<String, Object> router = objectMapper.convertValue(
+                        delta.get("router"),
+                        new TypeReference<Map<String, Object>>() {
+                        });
+                targetCell.setRouter(router);
+            }
+
+            if (delta.containsKey("connector") && delta.get("connector") != null) {
+                Map<String, Object> connector = objectMapper.convertValue(
+                        delta.get("connector"),
+                        new TypeReference<Map<String, Object>>() {
+                        });
+                targetCell.setConnector(connector);
+            }
+
             if (delta.containsKey("attrs") && delta.get("attrs") != null) {
                 Map<String, Object> incomingAttrs = objectMapper.convertValue(
                         delta.get("attrs"),

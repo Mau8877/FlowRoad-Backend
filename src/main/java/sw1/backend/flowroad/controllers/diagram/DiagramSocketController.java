@@ -50,7 +50,7 @@ public class DiagramSocketController {
                 rejectedMessage.setDragId(dragId);
 
                 Map<String, Object> delta = new HashMap<>();
-                delta.put("reason", "La celda ya está bloqueada por otro usuario o drag distinto.");
+                delta.put("reason", "La celda ya est\u00e1 bloqueada por otro usuario o drag distinto.");
                 rejectedMessage.setDelta(delta);
 
                 messagingTemplate.convertAndSend("/topic/session/" + sessionToken + "/cambios", rejectedMessage);
@@ -69,10 +69,8 @@ public class DiagramSocketController {
             return;
         }
 
-        boolean requiresLock = "MOVE_LIVE".equals(opType) ||
-                "MOVE_COMMIT".equals(opType) ||
-                "UPDATE_LINK".equals(opType) ||
-                "DELETE_LINK".equals(opType);
+        // Solo operaciones de drag requieren lock activo.
+        boolean requiresLock = "MOVE_LIVE".equals(opType) || "MOVE_COMMIT".equals(opType);
 
         if (requiresLock) {
             boolean allowed = sessionService.canOperateOnCell(sessionToken, cellId, userId, dragId);
