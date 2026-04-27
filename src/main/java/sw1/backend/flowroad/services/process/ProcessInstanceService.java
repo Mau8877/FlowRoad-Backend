@@ -74,7 +74,7 @@ public class ProcessInstanceService {
         DiagramRuntime runtime = buildRuntime(diagram);
 
         Diagram.DiagramCell initialNode = runtime.nodes.values().stream()
-                .filter(node -> getNodeType(node) == NodeType.INITIAL)
+                .filter(node -> getNodeType(runtime, node) == NodeType.INITIAL)
                 .findFirst()
                 .orElseThrow(() -> new AuthException("El diagrama no contiene un nodo INITIAL."));
 
@@ -85,7 +85,7 @@ public class ProcessInstanceService {
         }
 
         if (initialOutgoing.size() > 1) {
-            throw new AuthException("El nodo INITIAL no puede tener más de una salida en esta versión.");
+            throw new AuthException("El nodo INITIAL no puede tener mÃ¡s de una salida en esta versiÃ³n.");
         }
 
         LocalDateTime now = LocalDateTime.now();
@@ -111,7 +111,7 @@ public class ProcessInstanceService {
 
         String targetId = getTargetNodeId(initialOutgoing.get(0));
         if (targetId != null) {
-            activateOrAdvanceNode(saved, runtime, targetId);
+            activateOrAdvanceNode(saved, runtime, targetId, initialNode.getId());
         }
 
         refreshProcessStatus(saved);
@@ -178,14 +178,14 @@ public class ProcessInstanceService {
 
         ProcessAssignment assignment = processAssignmentRepository
                 .findByIdAndProcessInstanceId(assignmentId, processInstanceId)
-                .orElseThrow(() -> new ResourceNotFoundException("Asignación no encontrada."));
+                .orElseThrow(() -> new ResourceNotFoundException("AsignaciÃ³n no encontrada."));
 
         if (assignment.getStatus() != ProcessAssignmentStatus.PENDING) {
-            throw new AuthException("La asignación ya no está pendiente.");
+            throw new AuthException("La asignaciÃ³n ya no estÃ¡ pendiente.");
         }
 
         if (!Objects.equals(assignment.getAssignedUserId(), currentUser.getId())) {
-            throw new AuthException("No puedes completar una asignación de otro usuario.");
+            throw new AuthException("No puedes completar una asignaciÃ³n de otro usuario.");
         }
 
         Diagram diagram = diagramRepository.findByIdAndOrgId(instance.getDiagramId(), currentUser.getOrgId())
@@ -195,7 +195,7 @@ public class ProcessInstanceService {
 
         Diagram.DiagramCell currentNode = runtime.nodes.get(assignment.getNodeId());
         if (currentNode == null) {
-            throw new AuthException("El nodo actual de la asignación no existe en el diagrama.");
+            throw new AuthException("El nodo actual de la asignaciÃ³n no existe en el diagrama.");
         }
 
         List<Diagram.DiagramCell> outgoingLinks = runtime.outgoingByNode.getOrDefault(currentNode.getId(), List.of());
@@ -207,7 +207,7 @@ public class ProcessInstanceService {
         String targetNodeId = getTargetNodeId(selectedTransition);
 
         if (targetNodeId == null || !runtime.nodes.containsKey(targetNodeId)) {
-            throw new AuthException("La transición elegida no apunta a un nodo válido.");
+            throw new AuthException("La transiciÃ³n elegida no apunta a un nodo vÃ¡lido.");
         }
 
         Diagram.DiagramCell nextNode = runtime.nodes.get(targetNodeId);
@@ -240,7 +240,7 @@ public class ProcessInstanceService {
         decrementUserWorkloadById(assignment.getAssignedUserId());
         markNodeCompleted(instance, assignment.getNodeId());
 
-        activateOrAdvanceNode(instance, runtime, targetNodeId);
+        activateOrAdvanceNode(instance, runtime, targetNodeId, assignment.getNodeId());
         refreshProcessStatus(instance);
 
         ProcessInstance savedInstance = processInstanceRepository.save(instance);
@@ -295,14 +295,15 @@ public class ProcessInstanceService {
     private void activateOrAdvanceNode(
             ProcessInstance instance,
             DiagramRuntime runtime,
-            String nodeId) {
+            String nodeId,
+            String arrivingSourceNodeId) {
 
         Diagram.DiagramCell node = runtime.nodes.get(nodeId);
         if (node == null) {
-            throw new AuthException("El diagrama contiene una transición hacia un nodo inexistente: " + nodeId);
+            throw new AuthException("El diagrama contiene una transiciÃ³n hacia un nodo inexistente: " + nodeId);
         }
 
-        NodeType nodeType = getNodeType(node);
+        NodeType nodeType = getNodeType(runtime, node);
 
         boolean alreadyHasPendingAssignmentForNode = nodeType == NodeType.TASK
                 && hasPendingAssignmentForNode(instance.getId(), nodeId);
@@ -332,10 +333,10 @@ public class ProcessInstanceService {
             String targetNodeId = getTargetNodeId(selectedTransition);
 
             if (targetNodeId == null || !runtime.nodes.containsKey(targetNodeId)) {
-                throw new AuthException("La decisión apunta a un nodo destino inválido.");
+                throw new AuthException("La decisiÃ³n apunta a un nodo destino invÃ¡lido.");
             }
 
-            activateOrAdvanceNode(instance, runtime, targetNodeId);
+            activateOrAdvanceNode(instance, runtime, targetNodeId, nodeId);
             instance.setUpdatedAt(LocalDateTime.now());
             return;
         }
@@ -347,7 +348,7 @@ public class ProcessInstanceService {
             for (Diagram.DiagramCell link : outgoing) {
                 String forkTarget = getTargetNodeId(link);
                 if (forkTarget != null) {
-                    activateOrAdvanceNode(instance, runtime, forkTarget);
+                    activateOrAdvanceNode(instance, runtime, forkTarget, nodeId);
                 }
             }
 
@@ -356,15 +357,43 @@ public class ProcessInstanceService {
         }
 
         if (nodeType == NodeType.JOIN) {
+            registerJoinArrival(instance, nodeId, arrivingSourceNodeId);
             markNodeCompleted(instance, nodeId);
 
-            if (canJoinAdvance(instance, runtime, nodeId)) {
-                List<Diagram.DiagramCell> outgoing = runtime.outgoingByNode.getOrDefault(nodeId, List.of());
-                for (Diagram.DiagramCell link : outgoing) {
-                    String joinTarget = getTargetNodeId(link);
-                    if (joinTarget != null) {
-                        activateOrAdvanceNode(instance, runtime, joinTarget);
-                    }
+            if (!isJoinReady(instance, runtime, nodeId)) {
+                instance.setUpdatedAt(LocalDateTime.now());
+                return;
+            }
+
+            clearJoinArrivals(instance, nodeId);
+
+            List<Diagram.DiagramCell> outgoing = runtime.outgoingByNode.getOrDefault(nodeId, List.of());
+            if (outgoing.isEmpty()) {
+                instance.setUpdatedAt(LocalDateTime.now());
+                return;
+            }
+
+            if (outgoing.size() > 1) {
+                throw new AuthException("JOIN invalido: el nodo '" + nodeId + "' tiene multiples salidas.");
+            }
+
+            String joinTarget = getTargetNodeId(outgoing.get(0));
+            if (joinTarget != null) {
+                activateOrAdvanceNode(instance, runtime, joinTarget, nodeId);
+            }
+
+            instance.setUpdatedAt(LocalDateTime.now());
+            return;
+        }
+
+        if (nodeType == NodeType.PASSTHROUGH) {
+            markNodeCompleted(instance, nodeId);
+
+            List<Diagram.DiagramCell> outgoing = runtime.outgoingByNode.getOrDefault(nodeId, List.of());
+            if (!outgoing.isEmpty()) {
+                String nextTarget = getTargetNodeId(outgoing.get(0));
+                if (nextTarget != null) {
+                    activateOrAdvanceNode(instance, runtime, nextTarget, nodeId);
                 }
             }
 
@@ -477,10 +506,54 @@ public class ProcessInstanceService {
         if (currentCount >= MAX_NODE_ACTIVATIONS) {
             cancelInstanceInternal(instance, LocalDateTime.now());
             throw new AuthException(
-                    "El proceso fue cancelado automáticamente por posible bucle infinito en el nodo: " + nodeId);
+                    "El proceso fue cancelado automÃ¡ticamente por posible bucle infinito en el nodo: " + nodeId);
         }
 
         instance.getNodeActivationCounts().put(nodeId, currentCount + 1);
+    }
+
+    private void registerJoinArrival(ProcessInstance instance, String joinNodeId, String sourceNodeId) {
+        if (instance == null || joinNodeId == null || joinNodeId.isBlank() || sourceNodeId == null
+                || sourceNodeId.isBlank()) {
+            return;
+        }
+
+        if (instance.getJoinArrivals() == null) {
+            instance.setJoinArrivals(new HashMap<>());
+        }
+
+        List<String> arrivals = instance.getJoinArrivals().computeIfAbsent(joinNodeId, key -> new ArrayList<>());
+        if (!arrivals.contains(sourceNodeId)) {
+            arrivals.add(sourceNodeId);
+        }
+    }
+
+    private boolean isJoinReady(ProcessInstance instance, DiagramRuntime runtime, String joinNodeId) {
+        List<Diagram.DiagramCell> incoming = runtime.incomingByNode.getOrDefault(joinNodeId, List.of());
+        Set<String> expectedSources = incoming.stream()
+                .map(this::getSourceNodeId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+
+        if (expectedSources.isEmpty()) {
+            return true;
+        }
+
+        Map<String, List<String>> joinArrivals = instance.getJoinArrivals();
+        if (joinArrivals == null) {
+            return false;
+        }
+
+        List<String> arrivals = joinArrivals.getOrDefault(joinNodeId, List.of());
+        return arrivals.containsAll(expectedSources);
+    }
+
+    private void clearJoinArrivals(ProcessInstance instance, String joinNodeId) {
+        if (instance.getJoinArrivals() == null) {
+            return;
+        }
+
+        instance.getJoinArrivals().remove(joinNodeId);
     }
 
     private Diagram.DiagramCell resolveDecisionTransition(
@@ -492,7 +565,7 @@ public class ProcessInstanceService {
                 .getOrDefault(decisionNode.getId(), List.of());
 
         if (outgoingLinks.isEmpty()) {
-            throw new AuthException("El nodo de decisión no tiene transiciones salientes.");
+            throw new AuthException("El nodo de decisiÃ³n no tiene transiciones salientes.");
         }
 
         if (outgoingLinks.size() == 1) {
@@ -507,7 +580,7 @@ public class ProcessInstanceService {
 
         if (decisionValues.isEmpty()) {
             throw new AuthException(
-                    "No se pudo resolver la decisión porque el último informe no contiene una respuesta compatible.");
+                    "No se pudo resolver la decisiÃ³n porque el Ãºltimo informe no contiene una respuesta compatible.");
         }
 
         List<Diagram.DiagramCell> matches = outgoingLinks.stream()
@@ -522,11 +595,11 @@ public class ProcessInstanceService {
         }
 
         if (matches.size() > 1) {
-            throw new AuthException("La decisión es ambigua: más de una transición coincide con la respuesta.");
+            throw new AuthException("La decisiÃ³n es ambigua: mÃ¡s de una transiciÃ³n coincide con la respuesta.");
         }
 
         throw new AuthException(
-                "No se encontró una transición de decisión compatible con la respuesta registrada. "
+                "No se encontrÃ³ una transiciÃ³n de decisiÃ³n compatible con la respuesta registrada. "
                         + "Verifica que la respuesta coincida con los labels del diagrama, por ejemplo Si o No.");
     }
 
@@ -605,14 +678,14 @@ public class ProcessInstanceService {
         String normalized = value
                 .trim()
                 .toUpperCase(Locale.ROOT)
-                .replace("Á", "A")
-                .replace("É", "E")
-                .replace("Í", "I")
-                .replace("Ó", "O")
-                .replace("Ú", "U");
+                .replace("Ã", "A")
+                .replace("Ã‰", "E")
+                .replace("Ã", "I")
+                .replace("Ã“", "O")
+                .replace("Ãš", "U");
 
         return switch (normalized) {
-            case "SI", "SÍ", "YES", "TRUE", "VERDADERO", "APROBADO", "ACEPTADO", "ACEPTA" -> "SI";
+            case "SI", "SÃ", "YES", "TRUE", "VERDADERO", "APROBADO", "ACEPTADO", "ACEPTA" -> "SI";
             case "NO", "FALSE", "FALSO", "RECHAZADO", "NO ACEPTADO", "NO ACEPTA" -> "NO";
             default -> normalized;
         };
@@ -731,24 +804,6 @@ public class ProcessInstanceService {
         return savedInstance;
     }
 
-    private boolean canJoinAdvance(ProcessInstance instance, DiagramRuntime runtime, String joinNodeId) {
-        List<Diagram.DiagramCell> incoming = runtime.incomingByNode.getOrDefault(joinNodeId, List.of());
-        if (incoming.isEmpty()) {
-            return true;
-        }
-
-        Set<String> completed = new HashSet<>(instance.getCompletedNodeIds());
-
-        for (Diagram.DiagramCell link : incoming) {
-            String sourceId = getSourceNodeId(link);
-            if (sourceId == null || !completed.contains(sourceId)) {
-                return false;
-            }
-        }
-
-        return true;
-    }
-
     private void refreshProcessStatus(ProcessInstance instance) {
         if (instance.getStatus() == ProcessInstanceStatus.CANCELLED
                 || instance.getStatus() == ProcessInstanceStatus.COMPLETED) {
@@ -835,7 +890,7 @@ public class ProcessInstanceService {
             return outgoingLinks.stream()
                     .filter(link -> request.targetNodeId().equals(getTargetNodeId(link)))
                     .findFirst()
-                    .orElseThrow(() -> new AuthException("El targetNodeId no es una transición válida."));
+                    .orElseThrow(() -> new AuthException("El targetNodeId no es una transiciÃ³n vÃ¡lida."));
         }
 
         if (request != null && request.transitionLabel() != null && !request.transitionLabel().isBlank()) {
@@ -844,7 +899,7 @@ public class ProcessInstanceService {
             return outgoingLinks.stream()
                     .filter(link -> normalizeLabel(resolveTransitionLabel(link)).equals(expected))
                     .findFirst()
-                    .orElseThrow(() -> new AuthException("La transición indicada no existe en el flujo."));
+                    .orElseThrow(() -> new AuthException("La transiciÃ³n indicada no existe en el flujo."));
         }
 
         if (outgoingLinks.size() == 1) {
@@ -959,21 +1014,48 @@ public class ProcessInstanceService {
         return value.toString();
     }
 
-    private NodeType getNodeType(Diagram.DiagramCell node) {
+    private NodeType getNodeType(DiagramRuntime runtime, Diagram.DiagramCell node) {
         if (node == null) {
             return NodeType.TASK;
         }
 
         String tipo = normalizeLabel(readString(node.getCustomData(), "tipo"));
 
-        return switch (tipo) {
+        NodeType directType = switch (tipo) {
             case "INITIAL", "INICIO", "START" -> NodeType.INITIAL;
             case "FINAL", "FIN", "END" -> NodeType.FINAL;
-            case "DECISION", "DECISIÓN", "GATEWAY" -> NodeType.DECISION;
-            case "FORK", "PARALLEL" -> NodeType.FORK;
-            case "JOIN" -> NodeType.JOIN;
+            case "DECISION", "DECISIÃ“N", "GATEWAY" -> NodeType.DECISION;
+            case "FORK", "PARALLEL", "JOIN" -> NodeType.BAR;
             default -> NodeType.TASK;
         };
+
+        if (directType != NodeType.BAR) {
+            return directType;
+        }
+
+        String nodeId = node.getId();
+        int incomingCount = runtime.incomingByNode.getOrDefault(nodeId, List.of()).size();
+        int outgoingCount = runtime.outgoingByNode.getOrDefault(nodeId, List.of()).size();
+
+        if (incomingCount == 1 && outgoingCount >= 2) {
+            return NodeType.FORK;
+        }
+
+        if (incomingCount >= 2 && outgoingCount == 1) {
+            return NodeType.JOIN;
+        }
+
+        if (incomingCount == 1 && outgoingCount == 1) {
+            return NodeType.PASSTHROUGH;
+        }
+
+        if (incomingCount >= 2 && outgoingCount >= 2) {
+            throw new AuthException(
+                    "Barra de control ambigua en nodo '" + nodeId + "': tiene multiples entradas y salidas.");
+        }
+
+        throw new AuthException(
+                "Barra de control invalida en nodo '" + nodeId + "': se esperaban conexiones de FORK o JOIN.");
     }
 
     private boolean isLink(Diagram.DiagramCell cell) {
@@ -1172,8 +1254,10 @@ public class ProcessInstanceService {
         INITIAL,
         FINAL,
         DECISION,
+        BAR,
         FORK,
         JOIN,
+        PASSTHROUGH,
         TASK
     }
 

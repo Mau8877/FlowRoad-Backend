@@ -40,6 +40,9 @@ public class ProcessInstance {
     @Builder.Default
     private Map<String, Integer> nodeActivationCounts = new HashMap<>();
 
+    @Builder.Default
+    private Map<String, List<String>> joinArrivals = new HashMap<>();
+
     private Map<String, Object> requestData;
 
     private String startedByUserId;
