@@ -34,3 +34,6 @@ build/
 
 ### ENV ###
 .env
+
+### FIREBASE ###
+src/main/resources/*firebase-adminsdk*.json

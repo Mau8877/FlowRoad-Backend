@@ -9,6 +9,7 @@ spring:
 
 # Configuración del servidor embebido
 server:
+  address: 0.0.0.0
   port: 8080
   servlet:
     context-path: /api/v1 
@@ -18,4 +19,9 @@ jwt:
   secret: ${JWT_SECRET_KEY:clave_de_desarrollo_super_larga_y_segura_solo_local_987654321_usar_mas_de_256_bits}
   expiration: 86400000
 
+# Firebase Cloud Messaging
+firebase:
+  enabled: ${FIREBASE_ENABLED:false}
+  credentials:
+    path: ${FIREBASE_CREDENTIALS_PATH:}
 

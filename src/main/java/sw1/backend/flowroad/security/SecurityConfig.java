@@ -42,6 +42,7 @@ public class SecurityConfig {
                                 }))
                                 .authorizeHttpRequests(auth -> auth
                                                 .requestMatchers("/auth/**").permitAll()
+                                                .requestMatchers("/public/tracking/**").permitAll()
                                                 .requestMatchers("/ws-flowroad/**").permitAll()
                                                 .requestMatchers("/ws-processes/**").permitAll()
                                                 .anyRequest().authenticated())
