@@ -1,0 +1,13 @@
+target
+.git
+.gitignore
+.idea
+.vscode
+*.iml
+.env
+.env.*
+node_modules
+logs
+*.log
+*.json
+src/main/resources/flowroad-8877-firebase-adminsdk-fbsvc-570816fa3b
