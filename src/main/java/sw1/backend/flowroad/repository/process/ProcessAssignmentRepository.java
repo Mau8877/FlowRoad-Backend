@@ -17,6 +17,11 @@ public interface ProcessAssignmentRepository extends MongoRepository<ProcessAssi
         List<ProcessAssignment> findByProcessInstanceIdAndStatus(String processInstanceId,
                         ProcessAssignmentStatus status);
 
+        List<ProcessAssignment> findByProcessInstanceIdIn(List<String> processInstanceIds);
+
+        List<ProcessAssignment> findByProcessInstanceIdInAndStatus(List<String> processInstanceIds,
+                        ProcessAssignmentStatus status);
+
         Optional<ProcessAssignment> findByIdAndProcessInstanceId(String id, String processInstanceId);
 
         long countByProcessInstanceIdAndStatus(String processInstanceId, ProcessAssignmentStatus status);
