@@ -89,11 +89,13 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
     @Override
     public void registerStompEndpoints(StompEndpointRegistry registry) {
         registry.addEndpoint("/ws-flowroad")
-                .setAllowedOriginPatterns("http://localhost:4200", "http://127.0.0.1:4200")
+                .setAllowedOriginPatterns("http://localhost:4200", "http://127.0.0.1:4200",
+                        "http://18.191.37.123")
                 .withSockJS();
 
         registry.addEndpoint("/ws-processes")
-                .setAllowedOriginPatterns("http://localhost:4200", "http://127.0.0.1:4200")
+                .setAllowedOriginPatterns("http://localhost:4200", "http://127.0.0.1:4200",
+                        "http://18.191.37.123")
                 .withSockJS();
     }
 }
