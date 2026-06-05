@@ -1,4 +1,5 @@
 HELP.md
+BASE_DE_DATOS.md
 target/
 .mvn/wrapper/maven-wrapper.jar
 !**/src/main/**/target/
