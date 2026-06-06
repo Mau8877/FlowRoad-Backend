@@ -1,7 +1,6 @@
 package sw1.backend.flowroad.dtos.process;
 
 import java.time.LocalDateTime;
-import java.util.List;
 
 import lombok.Builder;
 import lombok.Data;
@@ -16,8 +15,6 @@ public class ClientProcessInstanceResponse {
     private String diagramName;
     private Integer diagramVersion;
     private ProcessInstanceStatus status;
-    private List<String> activeNodeIds;
-    private List<String> completedNodeIds;
     private String clientId;
     private String clientName;
     private String clientEmail;

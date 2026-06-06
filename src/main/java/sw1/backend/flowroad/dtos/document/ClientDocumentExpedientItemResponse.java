@@ -4,7 +4,7 @@ import lombok.Data;
 
 @Data
 public class ClientDocumentExpedientItemResponse {
-    private DocumentRequirementResponse requirement;
+    private ClientDocumentRequirementResponse requirement;
     private DocumentFileResponse currentFile;
     private String status;
     private Boolean canRead;

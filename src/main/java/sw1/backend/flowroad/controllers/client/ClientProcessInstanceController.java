@@ -1,6 +1,5 @@
 package sw1.backend.flowroad.controllers.client;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.stream.Collectors;
@@ -122,10 +121,6 @@ public class ClientProcessInstanceController {
                 .diagramName(instance.getDiagramName())
                 .diagramVersion(instance.getDiagramVersion())
                 .status(instance.getStatus())
-                .activeNodeIds(new ArrayList<>(
-                        instance.getActiveNodeIds() != null ? instance.getActiveNodeIds() : List.of()))
-                .completedNodeIds(new ArrayList<>(
-                        instance.getCompletedNodeIds() != null ? instance.getCompletedNodeIds() : List.of()))
                 .clientId(instance.getClientId())
                 .clientName(instance.getClientName())
                 .clientEmail(instance.getClientEmail())

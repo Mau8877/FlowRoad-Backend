@@ -21,6 +21,7 @@ import org.springframework.web.multipart.MultipartFile;
 import lombok.RequiredArgsConstructor;
 import sw1.backend.flowroad.dtos.document.ClientDocumentExpedientItemResponse;
 import sw1.backend.flowroad.dtos.document.ClientDocumentExpedientResponse;
+import sw1.backend.flowroad.dtos.document.ClientDocumentRequirementResponse;
 import sw1.backend.flowroad.dtos.document.DocumentDownloadUrlResponse;
 import sw1.backend.flowroad.dtos.document.DocumentExpedientItemResponse;
 import sw1.backend.flowroad.dtos.document.DocumentExpedientResponse;
@@ -195,6 +196,10 @@ public class DocumentFileService {
 
         if (!Objects.equals(documentFile.getProcessInstanceId(), instance.getId())) {
             throw new IllegalArgumentException("El documento no pertenece a la instancia indicada.");
+        }
+
+        if (documentFile.getStatus() != DocumentFileStatus.ACTIVE) {
+            throw new IllegalArgumentException("Solo se puede descargar un documento activo.");
         }
 
         DocumentRequirement requirement = getActiveRequirement(
@@ -605,25 +610,27 @@ public class DocumentFileService {
             ProcessInstance instance,
             DocumentRequirement requirement,
             DocumentFile latestFile) {
-        boolean canRead = Boolean.TRUE.equals(requirement.getClientCanRead());
+        boolean clientCanUpload = Boolean.TRUE.equals(requirement.getClientCanUpload());
+        boolean clientCanReplace = Boolean.TRUE.equals(requirement.getClientCanReplace());
+        boolean canRead = Boolean.TRUE.equals(requirement.getClientCanRead())
+                || clientCanUpload
+                || clientCanReplace;
         boolean nodeActive = instance.getActiveNodeIds() != null
                 && instance.getActiveNodeIds().contains(requirement.getNodeId());
         boolean hasActiveFile = latestFile != null && latestFile.getStatus() == DocumentFileStatus.ACTIVE;
 
         ClientDocumentExpedientItemResponse item = new ClientDocumentExpedientItemResponse();
-        item.setRequirement(toRequirementResponse(requirement));
+        item.setRequirement(toClientRequirementResponse(requirement, canRead, clientCanUpload, clientCanReplace));
         item.setCurrentFile(canRead && hasActiveFile ? toResponse(latestFile) : null);
         item.setStatus(hasActiveFile ? STATUS_UPLOADED : STATUS_PENDING);
         item.setCanRead(canRead);
-        item.setCanUpload(Boolean.TRUE.equals(requirement.getClientCanUpload()) && nodeActive);
-        item.setCanReplace(Boolean.TRUE.equals(requirement.getClientCanReplace()) && nodeActive && hasActiveFile);
+        item.setCanUpload(clientCanUpload && nodeActive);
+        item.setCanReplace(clientCanReplace && nodeActive && hasActiveFile);
         return item;
     }
 
     private boolean hasAnyClientPermission(DocumentRequirement requirement) {
-        return Boolean.TRUE.equals(requirement.getClientCanRead())
-                || Boolean.TRUE.equals(requirement.getClientCanUpload())
-                || Boolean.TRUE.equals(requirement.getClientCanReplace());
+        return effectiveClientCanRead(requirement);
     }
 
     private String resolveItemStatus(DocumentFile latestFile) {
@@ -705,6 +712,31 @@ public class DocumentFileService {
         response.setUpdatedAt(requirement.getUpdatedAt());
         response.setUpdatedBy(requirement.getUpdatedBy());
         return response;
+    }
+
+    private ClientDocumentRequirementResponse toClientRequirementResponse(
+            DocumentRequirement requirement,
+            boolean clientCanRead,
+            boolean clientCanUpload,
+            boolean clientCanReplace) {
+        ClientDocumentRequirementResponse response = new ClientDocumentRequirementResponse();
+        response.setId(requirement.getId());
+        response.setNodeId(requirement.getNodeId());
+        response.setName(requirement.getName());
+        response.setDescription(requirement.getDescription());
+        response.setRequired(requirement.getRequired());
+        response.setAllowedFileTypes(requirement.getAllowedFileTypes());
+        response.setMaxFileSizeMb(requirement.getMaxFileSizeMb());
+        response.setClientCanRead(clientCanRead);
+        response.setClientCanUpload(clientCanUpload);
+        response.setClientCanReplace(clientCanReplace);
+        return response;
+    }
+
+    private boolean effectiveClientCanRead(DocumentRequirement requirement) {
+        return Boolean.TRUE.equals(requirement.getClientCanRead())
+                || Boolean.TRUE.equals(requirement.getClientCanUpload())
+                || Boolean.TRUE.equals(requirement.getClientCanReplace());
     }
 
     private String resolveFileExtension(String fileName) {
