@@ -13,6 +13,8 @@ public interface ProcessInstanceRepository extends MongoRepository<ProcessInstan
 
     List<ProcessInstance> findAllByOrgIdOrderByStartedAtDesc(String orgId);
 
+    List<ProcessInstance> findByClientIdOrderByUpdatedAtDesc(String clientId);
+
     Optional<ProcessInstance> findByIdAndOrgId(String id, String orgId);
 
     Optional<ProcessInstance> findByCode(String code);

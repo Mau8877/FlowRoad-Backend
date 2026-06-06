@@ -19,6 +19,9 @@ public class DocumentRequirementResponse {
     private List<String> readDepartmentIds;
     private List<String> uploadDepartmentIds;
     private List<String> editDepartmentIds;
+    private Boolean clientCanRead;
+    private Boolean clientCanUpload;
+    private Boolean clientCanReplace;
     private String status;
     private LocalDateTime createdAt;
     private String createdBy;

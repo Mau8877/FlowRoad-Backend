@@ -44,6 +44,15 @@ public class DocumentRequirement {
     @Builder.Default
     private List<String> editDepartmentIds = new ArrayList<>();
 
+    @Builder.Default
+    private Boolean clientCanRead = false;
+
+    @Builder.Default
+    private Boolean clientCanUpload = false;
+
+    @Builder.Default
+    private Boolean clientCanReplace = false;
+
     private DocumentRequirementStatus status;
     private LocalDateTime createdAt;
     private String createdBy;

@@ -82,6 +82,9 @@ public class DocumentRequirementService {
                 .readDepartmentIds(normalized.readDepartmentIds())
                 .uploadDepartmentIds(normalized.uploadDepartmentIds())
                 .editDepartmentIds(normalized.editDepartmentIds())
+                .clientCanRead(normalized.clientCanRead())
+                .clientCanUpload(normalized.clientCanUpload())
+                .clientCanReplace(normalized.clientCanReplace())
                 .status(DocumentRequirementStatus.ACTIVE)
                 .createdAt(now)
                 .createdBy(currentUser.getId())
@@ -121,6 +124,9 @@ public class DocumentRequirementService {
         requirement.setReadDepartmentIds(normalized.readDepartmentIds());
         requirement.setUploadDepartmentIds(normalized.uploadDepartmentIds());
         requirement.setEditDepartmentIds(normalized.editDepartmentIds());
+        requirement.setClientCanRead(normalized.clientCanRead());
+        requirement.setClientCanUpload(normalized.clientCanUpload());
+        requirement.setClientCanReplace(normalized.clientCanReplace());
         requirement.setUpdatedAt(LocalDateTime.now());
         requirement.setUpdatedBy(currentUser.getId());
 
@@ -204,9 +210,18 @@ public class DocumentRequirementService {
         normalizedReadIds.addAll(uploadDepartmentIds);
         normalizedReadIds.addAll(editDepartmentIds);
 
-        if (normalizedReadIds.isEmpty() && uploadDepartmentIds.isEmpty() && editDepartmentIds.isEmpty()) {
+        boolean clientCanUpload = Boolean.TRUE.equals(request.clientCanUpload());
+        boolean clientCanReplace = Boolean.TRUE.equals(request.clientCanReplace());
+        boolean clientCanRead = Boolean.TRUE.equals(request.clientCanRead()) || clientCanUpload || clientCanReplace;
+
+        if (normalizedReadIds.isEmpty()
+                && uploadDepartmentIds.isEmpty()
+                && editDepartmentIds.isEmpty()
+                && !clientCanRead
+                && !clientCanUpload
+                && !clientCanReplace) {
             throw new IllegalArgumentException(
-                    "Debe existir al menos un departamento entre readDepartmentIds, uploadDepartmentIds y editDepartmentIds.");
+                    "Debe existir al menos un permiso departamental o un permiso habilitado para cliente.");
         }
 
         validateDepartmentsBelongToOrg(normalizedReadIds, uploadDepartmentIds, editDepartmentIds, orgId);
@@ -215,7 +230,10 @@ public class DocumentRequirementService {
                 allowedFileTypes,
                 List.copyOf(normalizedReadIds),
                 uploadDepartmentIds,
-                editDepartmentIds);
+                editDepartmentIds,
+                clientCanRead,
+                clientCanUpload,
+                clientCanReplace);
     }
 
     private void validateRequest(DocumentRequirementRequest request) {
@@ -353,6 +371,9 @@ public class DocumentRequirementService {
         response.setReadDepartmentIds(requirement.getReadDepartmentIds());
         response.setUploadDepartmentIds(requirement.getUploadDepartmentIds());
         response.setEditDepartmentIds(requirement.getEditDepartmentIds());
+        response.setClientCanRead(Boolean.TRUE.equals(requirement.getClientCanRead()));
+        response.setClientCanUpload(Boolean.TRUE.equals(requirement.getClientCanUpload()));
+        response.setClientCanReplace(Boolean.TRUE.equals(requirement.getClientCanReplace()));
         response.setStatus(requirement.getStatus() != null ? requirement.getStatus().name() : null);
         response.setCreatedAt(requirement.getCreatedAt());
         response.setCreatedBy(requirement.getCreatedBy());
@@ -365,6 +386,9 @@ public class DocumentRequirementService {
             List<String> allowedFileTypes,
             List<String> readDepartmentIds,
             List<String> uploadDepartmentIds,
-            List<String> editDepartmentIds) {
+            List<String> editDepartmentIds,
+            Boolean clientCanRead,
+            Boolean clientCanUpload,
+            Boolean clientCanReplace) {
     }
 }

@@ -16,5 +16,8 @@ public record DocumentRequirementRequest(
         @NotNull(message = "El tamano maximo es obligatorio") @Min(value = 1, message = "El tamano maximo minimo es 1 MB") @Max(value = 25, message = "El tamano maximo permitido es 25 MB") Integer maxFileSizeMb,
         List<String> readDepartmentIds,
         List<String> uploadDepartmentIds,
-        List<String> editDepartmentIds) {
+        List<String> editDepartmentIds,
+        Boolean clientCanRead,
+        Boolean clientCanUpload,
+        Boolean clientCanReplace) {
 }

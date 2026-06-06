@@ -28,6 +28,7 @@ public class S3StorageService {
 
     private static final Duration DEFAULT_DOWNLOAD_URL_TTL = Duration.ofMinutes(10);
     private static final String DEFAULT_CONTENT_TYPE = "application/octet-stream";
+    private static final int MAX_SLUG_LENGTH = 80;
 
     private final S3Client s3Client;
     private final S3Presigner s3Presigner;
@@ -37,15 +38,16 @@ public class S3StorageService {
 
     public StoredDocumentObject uploadDocument(
             MultipartFile file,
-            String orgId,
-            String processInstanceId,
-            String nodeId,
-            String documentRequirementId,
+            DocumentStorageContext context,
             int version) {
         validateBucket();
 
         if (file == null || file.isEmpty()) {
             throw new IllegalArgumentException("El archivo es obligatorio.");
+        }
+
+        if (context == null) {
+            throw new IllegalArgumentException("El contexto de almacenamiento es obligatorio.");
         }
 
         String originalFileName = resolveOriginalFileName(file);
@@ -54,10 +56,7 @@ public class S3StorageService {
                 ? file.getContentType()
                 : DEFAULT_CONTENT_TYPE;
         String s3Key = buildS3Key(
-                orgId,
-                processInstanceId,
-                nodeId,
-                documentRequirementId,
+                context,
                 version,
                 safeOriginalFileName);
 
@@ -114,19 +113,17 @@ public class S3StorageService {
     }
 
     public String buildS3Key(
-            String orgId,
-            String processInstanceId,
-            String nodeId,
-            String documentRequirementId,
+            DocumentStorageContext context,
             int version,
             String safeOriginalFileName) {
         return String.format(
                 Locale.ROOT,
-                "organizations/%s/process-instances/%s/nodes/%s/requirements/%s/v%d/%s-%s",
-                sanitizePathSegment(orgId),
-                sanitizePathSegment(processInstanceId),
-                sanitizePathSegment(nodeId),
-                sanitizePathSegment(documentRequirementId),
+                "flowroad/organizations/%s/%s/%s/%s/%s/v%d/%s-%s",
+                buildNamedIdSegment(context.orgName(), "organization", context.orgId()),
+                buildNamedIdSegment(context.diagramName(), "diagram", context.diagramId()),
+                buildNamedIdSegment(context.clientName(), "client", context.clientId()),
+                buildProcessSegment(context.processCode(), context.processInstanceId()),
+                buildNamedIdSegment(context.requirementName(), "requirement", context.documentRequirementId()),
                 Math.max(1, version),
                 UUID.randomUUID(),
                 sanitizeFileName(safeOriginalFileName));
@@ -156,6 +153,41 @@ public class S3StorageService {
         return StringUtils.hasText(sanitized) ? sanitized : "unknown";
     }
 
+    public String slugify(String value, String fallback) {
+        String candidate = StringUtils.hasText(value) ? value.trim() : fallback;
+        String normalized = Normalizer.normalize(candidate, Normalizer.Form.NFD)
+                .replaceAll("\\p{M}", "");
+        String slug = normalized
+                .toLowerCase(Locale.ROOT)
+                .replaceAll("[\\\\/]+", "-")
+                .replaceAll("[^a-z0-9]+", "-")
+                .replaceAll("-{2,}", "-")
+                .replaceAll("^-+|-+$", "");
+
+        if (!StringUtils.hasText(slug)) {
+            slug = StringUtils.hasText(fallback) ? fallback : "item";
+        }
+
+        if (slug.length() > MAX_SLUG_LENGTH) {
+            slug = slug.substring(0, MAX_SLUG_LENGTH)
+                    .replaceAll("-+$", "");
+        }
+
+        return StringUtils.hasText(slug) ? slug : "item";
+    }
+
+    private String buildNamedIdSegment(String name, String fallbackSlug, String id) {
+        String safeId = sanitizePathSegment(id);
+        String slug = slugify(name, fallbackSlug);
+        return slug + "-" + safeId;
+    }
+
+    private String buildProcessSegment(String processCode, String processInstanceId) {
+        String safeProcessCode = sanitizePathSegment(processCode);
+        String safeProcessInstanceId = sanitizePathSegment(processInstanceId);
+        return safeProcessCode + "-" + safeProcessInstanceId;
+    }
+
     private String resolveOriginalFileName(MultipartFile file) {
         String originalFileName = file.getOriginalFilename();
         return StringUtils.hasText(originalFileName) ? originalFileName : "document";
@@ -173,5 +205,18 @@ public class S3StorageService {
             String contentType,
             long size,
             String originalFileName) {
+    }
+
+    public record DocumentStorageContext(
+            String orgId,
+            String orgName,
+            String diagramId,
+            String diagramName,
+            String clientId,
+            String clientName,
+            String processCode,
+            String processInstanceId,
+            String documentRequirementId,
+            String requirementName) {
     }
 }

@@ -19,6 +19,8 @@ import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
 
 import lombok.RequiredArgsConstructor;
+import sw1.backend.flowroad.dtos.document.ClientDocumentExpedientItemResponse;
+import sw1.backend.flowroad.dtos.document.ClientDocumentExpedientResponse;
 import sw1.backend.flowroad.dtos.document.DocumentDownloadUrlResponse;
 import sw1.backend.flowroad.dtos.document.DocumentExpedientItemResponse;
 import sw1.backend.flowroad.dtos.document.DocumentExpedientResponse;
@@ -32,11 +34,14 @@ import sw1.backend.flowroad.models.document.DocumentRequirement;
 import sw1.backend.flowroad.models.document.DocumentRequirement.DocumentRequirementStatus;
 import sw1.backend.flowroad.models.process.ProcessAssignment;
 import sw1.backend.flowroad.models.process.ProcessInstance;
+import sw1.backend.flowroad.models.user.Roles;
 import sw1.backend.flowroad.models.user.User;
 import sw1.backend.flowroad.repository.document.DocumentFileRepository;
 import sw1.backend.flowroad.repository.document.DocumentRequirementRepository;
+import sw1.backend.flowroad.repository.organization.OrganizationRepository;
 import sw1.backend.flowroad.repository.process.ProcessAssignmentRepository;
 import sw1.backend.flowroad.repository.process.ProcessInstanceRepository;
+import sw1.backend.flowroad.services.document.S3StorageService.DocumentStorageContext;
 import sw1.backend.flowroad.services.document.S3StorageService.StoredDocumentObject;
 
 @Service
@@ -52,6 +57,7 @@ public class DocumentFileService {
     private final DocumentRequirementRepository documentRequirementRepository;
     private final ProcessInstanceRepository processInstanceRepository;
     private final ProcessAssignmentRepository processAssignmentRepository;
+    private final OrganizationRepository organizationRepository;
     private final S3StorageService s3StorageService;
 
     public DocumentExpedientResponse getExpedient(String processInstanceId, User currentUser) {
@@ -210,6 +216,172 @@ public class DocumentFileService {
         return response;
     }
 
+    public ClientDocumentExpedientResponse getClientExpedient(String processInstanceId, User currentUser) {
+        ProcessInstance instance = getClientInstance(processInstanceId, currentUser);
+
+        List<DocumentRequirement> requirements = documentRequirementRepository.findByOrgIdAndDiagramIdAndStatus(
+                instance.getOrgId(),
+                instance.getDiagramId(),
+                DocumentRequirementStatus.ACTIVE);
+
+        List<DocumentFile> files = documentFileRepository.findByOrgIdAndProcessInstanceId(
+                instance.getOrgId(),
+                instance.getId());
+
+        Map<String, DocumentFile> latestFileByRequirement = files.stream()
+                .collect(Collectors.toMap(
+                        DocumentFile::getDocumentRequirementId,
+                        Function.identity(),
+                        (left, right) -> safeVersion(left) >= safeVersion(right) ? left : right));
+
+        ClientDocumentExpedientResponse response = new ClientDocumentExpedientResponse();
+        response.setProcessInstanceId(instance.getId());
+        response.setProcessCode(instance.getCode());
+        response.setDiagramId(instance.getDiagramId());
+        response.setDiagramName(instance.getDiagramName());
+        response.setProcessStatus(instance.getStatus() != null ? instance.getStatus().name() : null);
+
+        response.setItems(requirements.stream()
+                .filter(this::hasAnyClientPermission)
+                .sorted(Comparator.comparing(DocumentRequirement::getNodeId, Comparator.nullsLast(String::compareTo))
+                        .thenComparing(DocumentRequirement::getName, Comparator.nullsLast(String::compareTo)))
+                .map(requirement -> toClientExpedientItem(
+                        instance,
+                        requirement,
+                        latestFileByRequirement.get(requirement.getId())))
+                .collect(Collectors.toList()));
+
+        return response;
+    }
+
+    @Transactional
+    public DocumentUploadResponse uploadClientDocument(
+            String processInstanceId,
+            String documentRequirementId,
+            MultipartFile file,
+            User currentUser) {
+        ProcessInstance instance = getClientInstance(processInstanceId, currentUser);
+        DocumentRequirement requirement = getActiveRequirement(
+                documentRequirementId,
+                instance.getOrgId(),
+                instance.getDiagramId());
+
+        if (!Boolean.TRUE.equals(requirement.getClientCanUpload())) {
+            throw new AccessDeniedException("El cliente no tiene permiso para subir este documento.");
+        }
+
+        validateRequirementNodeIsActive(instance, requirement);
+        validateFile(file, requirement);
+
+        List<DocumentFile> activeFiles = documentFileRepository
+                .findByOrgIdAndProcessInstanceIdAndDocumentRequirementIdAndStatus(
+                        instance.getOrgId(),
+                        instance.getId(),
+                        requirement.getId(),
+                        DocumentFileStatus.ACTIVE);
+
+        if (!activeFiles.isEmpty()) {
+            throw new IllegalArgumentException(
+                    "Ya existe un documento activo para este requisito. Usa el endpoint de reemplazo.");
+        }
+
+        int version = resolveNextVersion(instance.getOrgId(), instance.getId(), requirement.getId());
+        DocumentFile saved = createAndStoreDocument(
+                instance,
+                requirement,
+                null,
+                file,
+                currentUser,
+                version,
+                null);
+
+        return toUploadResponse(saved);
+    }
+
+    @Transactional
+    public DocumentFileResponse replaceClientDocument(
+            String processInstanceId,
+            String documentFileId,
+            MultipartFile file,
+            User currentUser) {
+        ProcessInstance instance = getClientInstance(processInstanceId, currentUser);
+        DocumentFile currentFile = getDocumentFile(documentFileId, instance.getOrgId());
+
+        if (!Objects.equals(currentFile.getProcessInstanceId(), instance.getId())) {
+            throw new IllegalArgumentException("El documento no pertenece a la instancia indicada.");
+        }
+
+        if (currentFile.getStatus() != DocumentFileStatus.ACTIVE) {
+            throw new IllegalArgumentException("Solo se puede reemplazar un documento activo.");
+        }
+
+        DocumentRequirement requirement = getActiveRequirement(
+                currentFile.getDocumentRequirementId(),
+                instance.getOrgId(),
+                instance.getDiagramId());
+
+        if (!Boolean.TRUE.equals(requirement.getClientCanReplace())) {
+            throw new AccessDeniedException("El cliente no tiene permiso para reemplazar este documento.");
+        }
+
+        validateRequirementNodeIsActive(instance, requirement);
+        validateFile(file, requirement);
+
+        int version = Math.max(safeVersion(currentFile) + 1,
+                resolveNextVersion(instance.getOrgId(), instance.getId(), requirement.getId()));
+
+        DocumentFile replacement = createAndStoreDocument(
+                instance,
+                requirement,
+                null,
+                file,
+                currentUser,
+                version,
+                null);
+
+        currentFile.setStatus(DocumentFileStatus.REPLACED);
+        currentFile.setUpdatedAt(LocalDateTime.now());
+        currentFile.setReplacedByDocumentFileId(replacement.getId());
+        documentFileRepository.save(currentFile);
+
+        return toResponse(replacement);
+    }
+
+    public DocumentDownloadUrlResponse generateClientDownloadUrl(
+            String processInstanceId,
+            String documentFileId,
+            User currentUser) {
+        ProcessInstance instance = getClientInstance(processInstanceId, currentUser);
+        DocumentFile documentFile = getDocumentFile(documentFileId, instance.getOrgId());
+
+        if (!Objects.equals(documentFile.getProcessInstanceId(), instance.getId())) {
+            throw new IllegalArgumentException("El documento no pertenece a la instancia indicada.");
+        }
+
+        if (documentFile.getStatus() != DocumentFileStatus.ACTIVE) {
+            throw new IllegalArgumentException("Solo se puede descargar un documento activo.");
+        }
+
+        DocumentRequirement requirement = getActiveRequirement(
+                documentFile.getDocumentRequirementId(),
+                instance.getOrgId(),
+                instance.getDiagramId());
+
+        if (!Boolean.TRUE.equals(requirement.getClientCanRead())) {
+            throw new AccessDeniedException("El cliente no tiene permiso para descargar este documento.");
+        }
+
+        URL downloadUrl = s3StorageService.generateDownloadUrl(documentFile.getS3Key(), DOWNLOAD_URL_TTL);
+
+        DocumentDownloadUrlResponse response = new DocumentDownloadUrlResponse();
+        response.setDocumentFileId(documentFile.getId());
+        response.setOriginalFileName(documentFile.getOriginalFileName());
+        response.setContentType(documentFile.getContentType());
+        response.setExpiresInSeconds(DOWNLOAD_URL_TTL.toSeconds());
+        response.setDownloadUrl(downloadUrl.toString());
+        return response;
+    }
+
     private DocumentFile createAndStoreDocument(
             ProcessInstance instance,
             DocumentRequirement requirement,
@@ -220,15 +392,12 @@ public class DocumentFileService {
             String replacedByDocumentFileId) {
         StoredDocumentObject stored = s3StorageService.uploadDocument(
                 file,
-                currentUser.getOrgId(),
-                instance.getId(),
-                requirement.getNodeId(),
-                requirement.getId(),
+                buildStorageContext(instance, requirement, instance.getOrgId()),
                 version);
 
         LocalDateTime now = LocalDateTime.now();
         DocumentFile documentFile = DocumentFile.builder()
-                .orgId(currentUser.getOrgId())
+                .orgId(instance.getOrgId())
                 .processInstanceId(instance.getId())
                 .processAssignmentId(normalizeOptionalId(processAssignmentId))
                 .diagramId(instance.getDiagramId())
@@ -245,7 +414,7 @@ public class DocumentFileService {
                 .version(version)
                 .uploadedBy(currentUser.getId())
                 .uploadedByName(resolveUserDisplayName(currentUser))
-                .uploadedByDepartmentId(currentUser.getDepartmentId())
+                .uploadedByDepartmentId(currentUser.getRole() == Roles.CLIENT ? null : currentUser.getDepartmentId())
                 .createdAt(now)
                 .updatedAt(now)
                 .replacedByDocumentFileId(replacedByDocumentFileId)
@@ -261,6 +430,46 @@ public class DocumentFileService {
 
         return processInstanceRepository.findByIdAndOrgId(processInstanceId, currentUser.getOrgId())
                 .orElseThrow(() -> new ResourceNotFoundException("Instancia de proceso no encontrada."));
+    }
+
+    private ProcessInstance getClientInstance(String processInstanceId, User currentUser) {
+        if (currentUser == null || currentUser.getRole() != Roles.CLIENT) {
+            throw new AccessDeniedException("Solo usuarios cliente pueden acceder a este recurso.");
+        }
+
+        if (!StringUtils.hasText(processInstanceId)) {
+            throw new IllegalArgumentException("El processInstanceId es obligatorio.");
+        }
+
+        ProcessInstance instance = processInstanceRepository.findById(processInstanceId)
+                .orElseThrow(() -> new ResourceNotFoundException("Instancia de proceso no encontrada."));
+
+        if (!Objects.equals(instance.getClientId(), currentUser.getId())) {
+            throw new AccessDeniedException("No tienes permiso para acceder a este tramite.");
+        }
+
+        return instance;
+    }
+
+    private DocumentStorageContext buildStorageContext(
+            ProcessInstance instance,
+            DocumentRequirement requirement,
+            String orgId) {
+        String orgName = organizationRepository.findById(orgId)
+                .map(organization -> organization.getName())
+                .orElse("organization");
+
+        return new DocumentStorageContext(
+                orgId,
+                orgName,
+                instance.getDiagramId(),
+                instance.getDiagramName(),
+                instance.getClientId(),
+                instance.getClientName(),
+                instance.getCode(),
+                instance.getId(),
+                requirement.getId(),
+                requirement.getName());
     }
 
     private DocumentRequirement getActiveRequirement(String requirementId, String orgId, String diagramId) {
@@ -307,6 +516,16 @@ public class DocumentFileService {
 
         if (!Objects.equals(assignment.getNodeId(), requirement.getNodeId())) {
             throw new IllegalArgumentException("La asignacion no corresponde al nodo del requisito documental.");
+        }
+    }
+
+    private void validateRequirementNodeIsActive(ProcessInstance instance, DocumentRequirement requirement) {
+        List<String> activeNodeIds = instance.getActiveNodeIds() != null
+                ? instance.getActiveNodeIds()
+                : List.of();
+
+        if (!activeNodeIds.contains(requirement.getNodeId())) {
+            throw new IllegalArgumentException("El nodo del requisito documental no esta activo para este tramite.");
         }
     }
 
@@ -382,6 +601,31 @@ public class DocumentFileService {
         return item;
     }
 
+    private ClientDocumentExpedientItemResponse toClientExpedientItem(
+            ProcessInstance instance,
+            DocumentRequirement requirement,
+            DocumentFile latestFile) {
+        boolean canRead = Boolean.TRUE.equals(requirement.getClientCanRead());
+        boolean nodeActive = instance.getActiveNodeIds() != null
+                && instance.getActiveNodeIds().contains(requirement.getNodeId());
+        boolean hasActiveFile = latestFile != null && latestFile.getStatus() == DocumentFileStatus.ACTIVE;
+
+        ClientDocumentExpedientItemResponse item = new ClientDocumentExpedientItemResponse();
+        item.setRequirement(toRequirementResponse(requirement));
+        item.setCurrentFile(canRead && hasActiveFile ? toResponse(latestFile) : null);
+        item.setStatus(hasActiveFile ? STATUS_UPLOADED : STATUS_PENDING);
+        item.setCanRead(canRead);
+        item.setCanUpload(Boolean.TRUE.equals(requirement.getClientCanUpload()) && nodeActive);
+        item.setCanReplace(Boolean.TRUE.equals(requirement.getClientCanReplace()) && nodeActive && hasActiveFile);
+        return item;
+    }
+
+    private boolean hasAnyClientPermission(DocumentRequirement requirement) {
+        return Boolean.TRUE.equals(requirement.getClientCanRead())
+                || Boolean.TRUE.equals(requirement.getClientCanUpload())
+                || Boolean.TRUE.equals(requirement.getClientCanReplace());
+    }
+
     private String resolveItemStatus(DocumentFile latestFile) {
         if (latestFile == null) {
             return STATUS_PENDING;
@@ -452,6 +696,9 @@ public class DocumentFileService {
         response.setReadDepartmentIds(requirement.getReadDepartmentIds());
         response.setUploadDepartmentIds(requirement.getUploadDepartmentIds());
         response.setEditDepartmentIds(requirement.getEditDepartmentIds());
+        response.setClientCanRead(Boolean.TRUE.equals(requirement.getClientCanRead()));
+        response.setClientCanUpload(Boolean.TRUE.equals(requirement.getClientCanUpload()));
+        response.setClientCanReplace(Boolean.TRUE.equals(requirement.getClientCanReplace()));
         response.setStatus(requirement.getStatus() != null ? requirement.getStatus().name() : null);
         response.setCreatedAt(requirement.getCreatedAt());
         response.setCreatedBy(requirement.getCreatedBy());
