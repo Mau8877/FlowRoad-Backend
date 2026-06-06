@@ -25,3 +25,7 @@ firebase:
   credentials:
     path: ${FIREBASE_CREDENTIALS_PATH:}
 
+aws:
+  region: ${AWS_REGION:}
+  s3:
+    bucket: ${AWS_S3_BUCKET:}

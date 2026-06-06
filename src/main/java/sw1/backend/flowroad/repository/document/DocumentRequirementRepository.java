@@ -18,6 +18,11 @@ public interface DocumentRequirementRepository extends MongoRepository<DocumentR
             String nodeId,
             DocumentRequirementStatus status);
 
+    List<DocumentRequirement> findByOrgIdAndDiagramIdAndStatus(
+            String orgId,
+            String diagramId,
+            DocumentRequirementStatus status);
+
     Optional<DocumentRequirement> findByIdAndOrgId(String id, String orgId);
 
     boolean existsByOrgIdAndDiagramIdAndNodeIdAndNameAndStatus(
