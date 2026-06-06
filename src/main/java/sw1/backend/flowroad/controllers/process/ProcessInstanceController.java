@@ -39,6 +39,7 @@ public class ProcessInstanceController {
 
         ProcessInstanceSummaryResponse created = processInstanceService.createProcessInstance(
                 request.diagramId(),
+                request.clientId(),
                 request.requestData(),
                 currentUser);
 

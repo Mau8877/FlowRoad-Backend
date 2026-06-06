@@ -18,10 +18,12 @@ public class ProcessInstanceSummaryResponse {
     private ProcessInstanceStatus status;
     private List<String> activeNodeIds;
     private List<String> completedNodeIds;
+    private String clientId;
+    private String clientName;
+    private String clientEmail;
     private String startedByUserId;
     private String startedByUserName;
     private LocalDateTime startedAt;
     private LocalDateTime updatedAt;
     private LocalDateTime finishedAt;
 }
-

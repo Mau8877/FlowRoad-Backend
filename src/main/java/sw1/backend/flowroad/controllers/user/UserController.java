@@ -7,6 +7,7 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
+import sw1.backend.flowroad.dtos.user.ClientSearchResponse;
 import sw1.backend.flowroad.dtos.user.UserResponse;
 import sw1.backend.flowroad.dtos.user.UpdateUserRequest;
 import sw1.backend.flowroad.models.user.User;
@@ -29,6 +30,14 @@ public class UserController {
     @GetMapping("/me")
     public ResponseEntity<UserResponse> getMyProfile(@AuthenticationPrincipal User currentUser) {
         return ResponseEntity.ok(userService.getById(currentUser.getId()));
+    }
+
+    @GetMapping("/clients/search")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'DESIGNER', 'WORKER', 'RECEP')")
+    public ResponseEntity<List<ClientSearchResponse>> searchClients(
+            @RequestParam String q,
+            @RequestParam(required = false) Integer limit) {
+        return ResponseEntity.ok(userService.searchClients(q, limit));
     }
 
     /**

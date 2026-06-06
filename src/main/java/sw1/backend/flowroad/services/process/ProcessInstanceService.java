@@ -65,11 +65,23 @@ public class ProcessInstanceService {
     @Transactional
     public ProcessInstanceSummaryResponse createProcessInstance(
             String diagramId,
+            String clientId,
             Map<String, Object> requestData,
             User startedBy) {
 
         Diagram diagram = diagramRepository.findByIdAndOrgId(diagramId, startedBy.getOrgId())
                 .orElseThrow(() -> new ResourceNotFoundException("Diagrama no encontrado para crear la instancia."));
+
+        User client = userRepository.findById(clientId)
+                .orElseThrow(() -> new ResourceNotFoundException("Cliente no encontrado."));
+
+        if (client.getRole() != Roles.CLIENT) {
+            throw new AuthException("El usuario seleccionado no es un cliente.");
+        }
+
+        if (!Boolean.TRUE.equals(client.getIsActive())) {
+            throw new AuthException("El cliente seleccionado no esta activo.");
+        }
 
         DiagramRuntime runtime = buildRuntime(diagram);
 
@@ -101,6 +113,9 @@ public class ProcessInstanceService {
                 .completedNodeIds(new ArrayList<>(List.of(initialNode.getId())))
                 .nodeActivationCounts(new HashMap<>())
                 .requestData(requestData != null ? requestData : Map.of())
+                .clientId(client.getId())
+                .clientName(getUserDisplayName(client))
+                .clientEmail(client.getEmail())
                 .startedByUserId(startedBy.getId())
                 .startedByUserName(getUserDisplayName(startedBy))
                 .startedAt(now)
@@ -1144,6 +1159,9 @@ public class ProcessInstanceService {
                         instance.getActiveNodeIds() != null ? instance.getActiveNodeIds() : List.of()))
                 .completedNodeIds(new ArrayList<>(
                         instance.getCompletedNodeIds() != null ? instance.getCompletedNodeIds() : List.of()))
+                .clientId(instance.getClientId())
+                .clientName(instance.getClientName())
+                .clientEmail(instance.getClientEmail())
                 .startedByUserId(instance.getStartedByUserId())
                 .startedByUserName(instance.getStartedByUserName())
                 .startedAt(instance.getStartedAt())

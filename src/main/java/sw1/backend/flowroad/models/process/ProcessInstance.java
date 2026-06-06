@@ -45,6 +45,10 @@ public class ProcessInstance {
 
     private Map<String, Object> requestData;
 
+    private String clientId;
+    private String clientName;
+    private String clientEmail;
+
     private String startedByUserId;
     private String startedByUserName;
     private LocalDateTime startedAt;
