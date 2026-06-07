@@ -35,3 +35,8 @@ aws:
   region: ${AWS_REGION:}
   s3:
     bucket: ${AWS_S3_BUCKET:}
+
+onlyoffice:
+  document-server-url: ${ONLYOFFICE_DOCUMENT_SERVER_URL:http://localhost:8082}
+  jwt-secret: ${ONLYOFFICE_JWT_SECRET:flowroad_onlyoffice_secret}
+  callback-base-url: ${ONLYOFFICE_CALLBACK_BASE_URL:http://host.docker.internal:8080/api/v1}

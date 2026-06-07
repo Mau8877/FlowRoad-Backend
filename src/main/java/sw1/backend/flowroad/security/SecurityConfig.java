@@ -46,6 +46,12 @@ public class SecurityConfig {
                                                 .requestMatchers("/public/tracking/**").permitAll()
                                                 .requestMatchers("/ws-flowroad/**").permitAll()
                                                 .requestMatchers("/ws-processes/**").permitAll()
+                                                .requestMatchers(
+                                                                "/document-collaboration/onlyoffice/files/*/download")
+                                                .permitAll()
+                                                .requestMatchers(
+                                                                "/document-collaboration/onlyoffice/files/*/callback")
+                                                .permitAll()
                                                 .anyRequest().authenticated())
                                 .sessionManagement(session -> session
                                                 .sessionCreationPolicy(SessionCreationPolicy.STATELESS))

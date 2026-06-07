@@ -14,9 +14,11 @@ import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
 
 import lombok.RequiredArgsConstructor;
+import software.amazon.awssdk.core.ResponseBytes;
 import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.GetObjectRequest;
+import software.amazon.awssdk.services.s3.model.GetObjectResponse;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 import software.amazon.awssdk.services.s3.presigner.S3Presigner;
 import software.amazon.awssdk.services.s3.presigner.model.GetObjectPresignRequest;
@@ -83,6 +85,50 @@ public class S3StorageService {
                 originalFileName);
     }
 
+    public StoredDocumentObject uploadDocumentBytes(
+            byte[] bytes,
+            String originalFileName,
+            String contentType,
+            DocumentStorageContext context,
+            int version) {
+        validateBucket();
+
+        if (bytes == null || bytes.length == 0) {
+            throw new IllegalArgumentException("El archivo es obligatorio.");
+        }
+
+        if (context == null) {
+            throw new IllegalArgumentException("El contexto de almacenamiento es obligatorio.");
+        }
+
+        String resolvedOriginalFileName = StringUtils.hasText(originalFileName)
+                ? originalFileName
+                : "document";
+        String resolvedContentType = StringUtils.hasText(contentType)
+                ? contentType
+                : DEFAULT_CONTENT_TYPE;
+        String s3Key = buildS3Key(
+                context,
+                version,
+                sanitizeFileName(resolvedOriginalFileName));
+
+        PutObjectRequest putObjectRequest = PutObjectRequest.builder()
+                .bucket(bucket)
+                .key(s3Key)
+                .contentType(resolvedContentType)
+                .contentLength((long) bytes.length)
+                .build();
+
+        s3Client.putObject(putObjectRequest, RequestBody.fromBytes(bytes));
+
+        return new StoredDocumentObject(
+                bucket,
+                s3Key,
+                resolvedContentType,
+                bytes.length,
+                resolvedOriginalFileName);
+    }
+
     public URL generateDownloadUrl(String s3Key) {
         return generateDownloadUrl(s3Key, DEFAULT_DOWNLOAD_URL_TTL);
     }
@@ -110,6 +156,26 @@ public class S3StorageService {
 
         PresignedGetObjectRequest presignedRequest = s3Presigner.presignGetObject(presignRequest);
         return presignedRequest.url();
+    }
+
+    public DownloadedDocumentObject downloadDocument(String s3Key) {
+        validateBucket();
+
+        if (!StringUtils.hasText(s3Key)) {
+            throw new IllegalArgumentException("El s3Key es obligatorio.");
+        }
+
+        GetObjectRequest getObjectRequest = GetObjectRequest.builder()
+                .bucket(bucket)
+                .key(s3Key)
+                .build();
+
+        ResponseBytes<GetObjectResponse> responseBytes = s3Client.getObjectAsBytes(getObjectRequest);
+        GetObjectResponse response = responseBytes.response();
+        return new DownloadedDocumentObject(
+                responseBytes.asByteArray(),
+                response.contentType(),
+                response.contentLength());
     }
 
     public String buildS3Key(
@@ -205,6 +271,12 @@ public class S3StorageService {
             String contentType,
             long size,
             String originalFileName) {
+    }
+
+    public record DownloadedDocumentObject(
+            byte[] bytes,
+            String contentType,
+            Long contentLength) {
     }
 
     public record DocumentStorageContext(
