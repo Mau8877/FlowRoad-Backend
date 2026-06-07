@@ -13,7 +13,7 @@ public record DocumentRequirementRequest(
         String description,
         @NotNull(message = "Debe indicar si el requisito es obligatorio") Boolean required,
         @NotEmpty(message = "Debe indicar al menos un tipo de archivo permitido") List<String> allowedFileTypes,
-        @NotNull(message = "El tamano maximo es obligatorio") @Min(value = 1, message = "El tamano maximo minimo es 1 MB") @Max(value = 25, message = "El tamano maximo permitido es 25 MB") Integer maxFileSizeMb,
+        @NotNull(message = "El tamano maximo es obligatorio") @Min(value = 1, message = "El tamano maximo minimo es 1 MB") @Max(value = 100, message = "El tamano maximo permitido es 100 MB") Integer maxFileSizeMb,
         List<String> readDepartmentIds,
         List<String> uploadDepartmentIds,
         List<String> editDepartmentIds,

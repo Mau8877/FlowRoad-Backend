@@ -35,7 +35,8 @@ public class DocumentRequirementService {
             "xlsx",
             "jpg",
             "jpeg",
-            "png");
+            "png",
+            "mp4");
 
     private final DocumentRequirementRepository repository;
     private final DiagramRepository diagramRepository;
@@ -273,7 +274,7 @@ public class DocumentRequirementService {
             if (!ALLOWED_FILE_TYPES.contains(cleanType)) {
                 throw new IllegalArgumentException(
                         "Tipo de archivo no permitido: " + cleanType
-                                + ". Permitidos: pdf, doc, docx, xls, xlsx, jpg, jpeg, png.");
+                                + ". Permitidos: pdf, doc, docx, xls, xlsx, jpg, jpeg, png, mp4.");
             }
 
             normalized.add(cleanType);
@@ -287,8 +288,8 @@ public class DocumentRequirementService {
             throw new IllegalArgumentException("El tamano maximo es obligatorio.");
         }
 
-        if (maxFileSizeMb < 1 || maxFileSizeMb > 25) {
-            throw new IllegalArgumentException("El tamano maximo debe estar entre 1 y 25 MB.");
+        if (maxFileSizeMb < 1 || maxFileSizeMb > 100) {
+            throw new IllegalArgumentException("El tamano maximo debe estar entre 1 y 100 MB.");
         }
     }
 
