@@ -30,6 +30,9 @@ import sw1.backend.flowroad.dtos.process.ProcessInstanceSummaryResponse;
 import sw1.backend.flowroad.exceptions.AuthException;
 import sw1.backend.flowroad.exceptions.ResourceNotFoundException;
 import sw1.backend.flowroad.models.diagram.Diagram;
+import sw1.backend.flowroad.models.document.DocumentFile.DocumentFileStatus;
+import sw1.backend.flowroad.models.document.DocumentRequirement;
+import sw1.backend.flowroad.models.document.DocumentRequirement.DocumentRequirementStatus;
 import sw1.backend.flowroad.models.process.ProcessAssignment;
 import sw1.backend.flowroad.models.process.ProcessAssignment.ProcessAssignmentStatus;
 import sw1.backend.flowroad.models.process.ProcessHistory;
@@ -39,6 +42,8 @@ import sw1.backend.flowroad.models.templates.Template;
 import sw1.backend.flowroad.models.user.Roles;
 import sw1.backend.flowroad.models.user.User;
 import sw1.backend.flowroad.repository.diagram.DiagramRepository;
+import sw1.backend.flowroad.repository.document.DocumentFileRepository;
+import sw1.backend.flowroad.repository.document.DocumentRequirementRepository;
 import sw1.backend.flowroad.repository.organization.CargoRepository;
 import sw1.backend.flowroad.repository.organization.DepartmentRepository;
 import sw1.backend.flowroad.repository.process.ProcessAssignmentRepository;
@@ -61,6 +66,8 @@ public class ProcessInstanceService {
     private final DepartmentRepository departmentRepository;
     private final CargoRepository cargoRepository;
     private final TemplateRepository templateRepository;
+    private final DocumentRequirementRepository documentRequirementRepository;
+    private final DocumentFileRepository documentFileRepository;
 
     @Transactional
     public ProcessInstanceSummaryResponse createProcessInstance(
@@ -202,6 +209,8 @@ public class ProcessInstanceService {
         if (!Objects.equals(assignment.getAssignedUserId(), currentUser.getId())) {
             throw new AuthException("No puedes completar una asignaciÃ³n de otro usuario.");
         }
+
+        validateRequiredDocumentsCompleted(instance, assignment);
 
         Diagram diagram = diagramRepository.findByIdAndOrgId(instance.getDiagramId(), currentUser.getOrgId())
                 .orElseThrow(() -> new ResourceNotFoundException("Diagrama base de la instancia no encontrado."));
@@ -1266,6 +1275,46 @@ public class ProcessInstanceService {
                     return labels;
                 })
                 .orElse(Map.of());
+    }
+
+    private void validateRequiredDocumentsCompleted(ProcessInstance instance, ProcessAssignment assignment) {
+        List<DocumentRequirement> missingRequirements = documentRequirementRepository
+                .findByOrgIdAndDiagramIdAndNodeIdAndStatus(
+                        instance.getOrgId(),
+                        instance.getDiagramId(),
+                        assignment.getNodeId(),
+                        DocumentRequirementStatus.ACTIVE)
+                .stream()
+                .filter(requirement -> Boolean.TRUE.equals(requirement.getRequired()))
+                .filter(requirement -> !hasActiveDocumentForRequirement(instance, requirement))
+                .toList();
+
+        if (missingRequirements.isEmpty()) {
+            return;
+        }
+
+        String missingNames = missingRequirements.stream()
+                .map(DocumentRequirement::getName)
+                .filter(Objects::nonNull)
+                .filter(name -> !name.isBlank())
+                .collect(Collectors.joining(", "));
+
+        if (missingNames.isBlank()) {
+            missingNames = "documentos obligatorios";
+        }
+
+        throw new IllegalArgumentException(
+                "No se puede completar la tarea. Faltan documentos obligatorios: " + missingNames + ".");
+    }
+
+    private boolean hasActiveDocumentForRequirement(ProcessInstance instance, DocumentRequirement requirement) {
+        return !documentFileRepository
+                .findByOrgIdAndProcessInstanceIdAndDocumentRequirementIdAndStatus(
+                        instance.getOrgId(),
+                        instance.getId(),
+                        requirement.getId(),
+                        DocumentFileStatus.ACTIVE)
+                .isEmpty();
     }
 
     private enum NodeType {
