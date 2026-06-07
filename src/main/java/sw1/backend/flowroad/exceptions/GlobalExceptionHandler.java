@@ -10,6 +10,8 @@ import org.springframework.security.access.AccessDeniedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
+import org.springframework.web.multipart.MultipartException;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
@@ -69,6 +71,14 @@ public class GlobalExceptionHandler {
         error.put("error", "Conflicto de datos");
         error.put("message", "Ya existe un registro con datos unicos duplicados.");
         return new ResponseEntity<>(error, HttpStatus.CONFLICT);
+    }
+
+    @ExceptionHandler({ MaxUploadSizeExceededException.class, MultipartException.class })
+    public ResponseEntity<Map<String, String>> handleMultipartException(Exception ex) {
+        Map<String, String> error = new HashMap<>();
+        error.put("error", "Archivo demasiado grande");
+        error.put("message", "El archivo supera el tamano maximo permitido por el servidor.");
+        return new ResponseEntity<>(error, HttpStatus.PAYLOAD_TOO_LARGE);
     }
 
     @ExceptionHandler(Exception.class)
