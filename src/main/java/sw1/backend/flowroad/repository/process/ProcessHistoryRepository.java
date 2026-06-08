@@ -11,5 +11,6 @@ import sw1.backend.flowroad.models.process.ProcessHistory;
 public interface ProcessHistoryRepository extends MongoRepository<ProcessHistory, String> {
 
     List<ProcessHistory> findByProcessInstanceIdOrderByPerformedAtAsc(String processInstanceId);
-}
 
+    long deleteByProcessInstanceIdIn(List<String> processInstanceIds);
+}

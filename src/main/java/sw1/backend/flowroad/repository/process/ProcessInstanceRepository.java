@@ -18,4 +18,10 @@ public interface ProcessInstanceRepository extends MongoRepository<ProcessInstan
     Optional<ProcessInstance> findByIdAndOrgId(String id, String orgId);
 
     Optional<ProcessInstance> findByCode(String code);
+
+    List<ProcessInstance> findAllByCode(String code);
+
+    List<ProcessInstance> findAllByCodeStartingWith(String codePrefix);
+
+    long deleteByIdIn(List<String> ids);
 }

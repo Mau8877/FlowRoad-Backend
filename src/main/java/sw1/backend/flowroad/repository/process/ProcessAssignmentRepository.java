@@ -41,4 +41,6 @@ public interface ProcessAssignmentRepository extends MongoRepository<ProcessAssi
                         String assignedUserId,
                         ProcessAssignmentStatus status);
 
+        long deleteByProcessInstanceIdIn(List<String> processInstanceIds);
+
 }
