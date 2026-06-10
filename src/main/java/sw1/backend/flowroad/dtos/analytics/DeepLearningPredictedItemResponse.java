@@ -9,7 +9,7 @@ import lombok.NoArgsConstructor;
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-public class DeepLearningDatasetItemResponse {
+public class DeepLearningPredictedItemResponse {
     private String processInstanceId;
     private String assignmentId;
     private String diagramId;
@@ -30,11 +30,10 @@ public class DeepLearningDatasetItemResponse {
     private Double slaHoursTarget;
     private int nodeActivationCount;
 
-    @com.fasterxml.jackson.annotation.JsonProperty("bottleneck")
-    private boolean isBottleneck;
+    private String originalPriorityLabel;
+    private String originalRecommendedAction;
+    private Boolean originalBottleneck;
+    private Boolean originalAnomalous;
     
-    @com.fasterxml.jackson.annotation.JsonProperty("anomalous")
-    private boolean isAnomalous;
-    private String priorityLabel;
-    private String recommendedAction;
+    private DeepLearningPredictResponse prediction;
 }

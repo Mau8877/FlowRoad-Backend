@@ -44,7 +44,8 @@ onlyoffice:
 flowroad:
   ia:
     base-url: ${FLOWROAD_IA_BASE_URL:http://localhost:8000}
-    timeout-ms: ${FLOWROAD_IA_TIMEOUT_MS:5000}
+    timeout-ms: ${FLOWROAD_IA_TIMEOUT_MS:30000}
+    batch-size: ${FLOWROAD_IA_BATCH_SIZE:50}
   seed:
     enabled: ${FLOWROAD_SEED_ENABLED:false}
     superuser:

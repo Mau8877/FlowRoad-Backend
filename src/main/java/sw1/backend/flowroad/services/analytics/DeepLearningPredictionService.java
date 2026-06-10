@@ -5,6 +5,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import sw1.backend.flowroad.dtos.analytics.*;
 
+import org.springframework.beans.factory.annotation.Value;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -14,6 +15,9 @@ import java.util.List;
 public class DeepLearningPredictionService {
 
     private final DeepLearningPredictionClient predictionClient;
+
+    @Value("${flowroad.ia.batch-size:50}")
+    private int batchSize;
 
     public DeepLearningHealthResponse getHealth() {
         try {
@@ -147,6 +151,198 @@ public class DeepLearningPredictionService {
                 .bottleneckDelayHours(delayHours)
                 .bottleneckRatio(ratio)
                 .slaExceeded(slaExceeded)
+                .build();
+    }
+
+    public DeepLearningCurrentPredictionsResponse getCurrentPredictions(List<DeepLearningDatasetItemResponse> datasetItems) {
+        if (datasetItems == null || datasetItems.isEmpty()) {
+            return DeepLearningCurrentPredictionsResponse.builder()
+                    .totalItems(0)
+                    .generatedAt(java.time.LocalDateTime.now())
+                    .modelUsed(false)
+                    .summary(DeepLearningPredictionSummary.builder()
+                            .normalCount(0)
+                            .mediumCount(0)
+                            .highCount(0)
+                            .bottleneckCount(0)
+                            .slaExceededCount(0)
+                            .averageRiskScore(0.0)
+                            .averageBottleneckScore(0.0)
+                            .build())
+                    .items(new ArrayList<>())
+                    .build();
+        }
+
+        // 1. Segmentar en chunks y llamar a predictBatch por cada chunk
+        List<DeepLearningPredictResponse> allPredictions = new ArrayList<>();
+        boolean anyFallbackUsed = false;
+        
+        int totalDatasetSize = datasetItems.size();
+        for (int i = 0; i < totalDatasetSize; i += batchSize) {
+            int end = Math.min(totalDatasetSize, i + batchSize);
+            List<DeepLearningDatasetItemResponse> chunkItems = datasetItems.subList(i, end);
+            
+            try {
+                DeepLearningPredictBatchRequest batchRequest = DeepLearningPredictBatchRequest.builder()
+                        .items(chunkItems)
+                        .build();
+                DeepLearningPredictBatchResponse batchResponse = predictBatch(batchRequest);
+                
+                List<DeepLearningPredictResponse> chunkPredictions = batchResponse.getPredictions();
+                if (chunkPredictions == null || chunkPredictions.isEmpty()) {
+                    log.warn("Respuesta nula o vacía de predictBatch para chunk [{}-{}]. Usando fallback.", i, end - 1);
+                    anyFallbackUsed = true;
+                    for (DeepLearningDatasetItemResponse item : chunkItems) {
+                        allPredictions.add(buildFallbackPredict(item));
+                    }
+                } else if (chunkPredictions.size() != chunkItems.size()) {
+                    log.warn("Mismatch de tamaño en predicción del chunk [{}-{}]. Esperado: {}, Recibido: {}. Usando fallback.", 
+                            i, end - 1, chunkItems.size(), chunkPredictions.size());
+                    anyFallbackUsed = true;
+                    for (DeepLearningDatasetItemResponse item : chunkItems) {
+                        allPredictions.add(buildFallbackPredict(item));
+                    }
+                } else {
+                    for (DeepLearningPredictResponse pred : chunkPredictions) {
+                        allPredictions.add(pred);
+                        if (pred == null || !Boolean.TRUE.equals(pred.getModelUsed())) {
+                            anyFallbackUsed = true;
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                log.warn("Excepción al procesar chunk [{}-{}]: {}. Usando fallback para este chunk.", i, end - 1, e.getMessage());
+                anyFallbackUsed = true;
+                for (DeepLearningDatasetItemResponse item : chunkItems) {
+                    allPredictions.add(buildFallbackPredict(item));
+                }
+            }
+        }
+        
+        boolean modelUsed = !anyFallbackUsed && !allPredictions.isEmpty();
+
+        List<DeepLearningPredictedItemResponse> predictedItems = new ArrayList<>();
+        int normalCount = 0;
+        int mediumCount = 0;
+        int highCount = 0;
+        int bottleneckCount = 0;
+        int slaExceededCount = 0;
+        double totalRiskScore = 0.0;
+        double totalBottleneckScore = 0.0;
+
+        for (int i = 0; i < datasetItems.size(); i++) {
+            DeepLearningDatasetItemResponse item = datasetItems.get(i);
+            DeepLearningPredictResponse prediction = null;
+
+            if (i < allPredictions.size()) {
+                prediction = allPredictions.get(i);
+            } else {
+                prediction = buildFallbackPredict(item);
+            }
+
+            // Mapear DTO de item con predicción
+            DeepLearningPredictedItemResponse predictedItem = DeepLearningPredictedItemResponse.builder()
+                    .processInstanceId(item.getProcessInstanceId())
+                    .assignmentId(item.getAssignmentId())
+                    .diagramId(item.getDiagramId())
+                    .diagramName(item.getDiagramName())
+                    .stepIndex(item.getStepIndex())
+                    .nodeId(item.getNodeId())
+                    .assignedDepartmentId(item.getAssignedDepartmentId())
+                    .assignedDepartmentName(item.getAssignedDepartmentName())
+                    .assignedCargoId(item.getAssignedCargoId())
+                    .assignedUserId(item.getAssignedUserId())
+                    .workerActiveLoad(item.getWorkerActiveLoad())
+                    .departmentActiveLoad(item.getDepartmentActiveLoad())
+                    .assignmentDurationHours(item.getAssignmentDurationHours())
+                    .currentStepDurationHours(item.getCurrentStepDurationHours())
+                    .accumulatedDurationHours(item.getAccumulatedDurationHours())
+                    .reworkCount(item.getReworkCount())
+                    .slaHoursTarget(item.getSlaHoursTarget())
+                    .nodeActivationCount(item.getNodeActivationCount())
+                    .originalPriorityLabel(item.getPriorityLabel())
+                    .originalRecommendedAction(item.getRecommendedAction())
+                    .originalBottleneck(item.isBottleneck())
+                    .originalAnomalous(item.isAnomalous())
+                    .prediction(prediction)
+                    .build();
+
+            predictedItems.add(predictedItem);
+
+            // Acumular estadísticas del resumen
+            String pLabel = prediction.getPriorityLabel();
+            if ("HIGH".equalsIgnoreCase(pLabel)) {
+                highCount++;
+            } else if ("MEDIUM".equalsIgnoreCase(pLabel)) {
+                mediumCount++;
+            } else {
+                normalCount++;
+            }
+
+            if (prediction.getBottleneckScore() != null && prediction.getBottleneckScore() > 0.0) {
+                bottleneckCount++;
+            }
+            if (Boolean.TRUE.equals(prediction.getSlaExceeded())) {
+                slaExceededCount++;
+            }
+
+            totalRiskScore += prediction.getRiskScore() != null ? prediction.getRiskScore() : 0.0;
+            totalBottleneckScore += prediction.getBottleneckScore() != null ? prediction.getBottleneckScore() : 0.0;
+        }
+
+        int count = datasetItems.size();
+        double avgRisk = totalRiskScore / count;
+        double avgBottleneck = totalBottleneckScore / count;
+
+        DeepLearningPredictionSummary summary = DeepLearningPredictionSummary.builder()
+                .normalCount(normalCount)
+                .mediumCount(mediumCount)
+                .highCount(highCount)
+                .bottleneckCount(bottleneckCount)
+                .slaExceededCount(slaExceededCount)
+                .averageRiskScore(Math.round(avgRisk * 100.0) / 100.0)
+                .averageBottleneckScore(Math.round(avgBottleneck * 100.0) / 100.0)
+                .build();
+
+        // Ordenamiento recomendado de items más críticos primero:
+        // 1. priorityLabel = HIGH
+        // 2. Mayor bottleneckScore
+        // 3. Mayor riskScore
+        // 4. slaExceeded = true
+        predictedItems.sort((a, b) -> {
+            String aPriority = a.getPrediction().getPriorityLabel();
+            String bPriority = b.getPrediction().getPriorityLabel();
+            
+            int aPriorityWeight = "HIGH".equalsIgnoreCase(aPriority) ? 3 : ("MEDIUM".equalsIgnoreCase(aPriority) ? 2 : 1);
+            int bPriorityWeight = "HIGH".equalsIgnoreCase(bPriority) ? 3 : ("MEDIUM".equalsIgnoreCase(bPriority) ? 2 : 1);
+            
+            if (aPriorityWeight != bPriorityWeight) {
+                return Integer.compare(bPriorityWeight, aPriorityWeight);
+            }
+            
+            Double aBScore = a.getPrediction().getBottleneckScore() != null ? a.getPrediction().getBottleneckScore() : 0.0;
+            Double bBScore = b.getPrediction().getBottleneckScore() != null ? b.getPrediction().getBottleneckScore() : 0.0;
+            if (!aBScore.equals(bBScore)) {
+                return Double.compare(bBScore, aBScore);
+            }
+            
+            Double aRScore = a.getPrediction().getRiskScore() != null ? a.getPrediction().getRiskScore() : 0.0;
+            Double bRScore = b.getPrediction().getRiskScore() != null ? b.getPrediction().getRiskScore() : 0.0;
+            if (!aRScore.equals(bRScore)) {
+                return Double.compare(bRScore, aRScore);
+            }
+            
+            boolean aSla = Boolean.TRUE.equals(a.getPrediction().getSlaExceeded());
+            boolean bSla = Boolean.TRUE.equals(b.getPrediction().getSlaExceeded());
+            return Boolean.compare(bSla, aSla);
+        });
+
+        return DeepLearningCurrentPredictionsResponse.builder()
+                .totalItems(count)
+                .generatedAt(java.time.LocalDateTime.now())
+                .modelUsed(modelUsed)
+                .summary(summary)
+                .items(predictedItems)
                 .build();
     }
 }

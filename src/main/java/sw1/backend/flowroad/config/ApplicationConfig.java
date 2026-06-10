@@ -1,6 +1,7 @@
 package sw1.backend.flowroad.config;
 
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.data.mongodb.MongoDatabaseFactory;
@@ -70,11 +71,14 @@ public class ApplicationConfig {
         return new MongoTransactionManager(mongoDatabaseFactory);
     }
 
+    @Value("${flowroad.ia.timeout-ms:30000}")
+    private int iaTimeoutMs;
+
     @Bean
     public org.springframework.web.client.RestTemplate restTemplate() {
         org.springframework.http.client.SimpleClientHttpRequestFactory factory = new org.springframework.http.client.SimpleClientHttpRequestFactory();
-        factory.setConnectTimeout(5000);
-        factory.setReadTimeout(5000);
+        factory.setConnectTimeout(iaTimeoutMs);
+        factory.setReadTimeout(iaTimeoutMs);
         return new org.springframework.web.client.RestTemplate(factory);
     }
 }

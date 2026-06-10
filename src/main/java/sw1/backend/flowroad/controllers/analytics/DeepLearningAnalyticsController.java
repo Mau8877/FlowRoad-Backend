@@ -19,6 +19,7 @@ import sw1.backend.flowroad.dtos.analytics.DeepLearningPredictRequest;
 import sw1.backend.flowroad.dtos.analytics.DeepLearningPredictResponse;
 import sw1.backend.flowroad.dtos.analytics.DeepLearningPredictBatchRequest;
 import sw1.backend.flowroad.dtos.analytics.DeepLearningPredictBatchResponse;
+import sw1.backend.flowroad.dtos.analytics.DeepLearningCurrentPredictionsResponse;
 import sw1.backend.flowroad.services.analytics.DatasetGeneratorService;
 import sw1.backend.flowroad.services.analytics.DeepLearningPredictionService;
 
@@ -75,5 +76,33 @@ public class DeepLearningAnalyticsController {
     public ResponseEntity<DeepLearningPredictBatchResponse> predictDeepLearningRiskBatch(
             @org.springframework.web.bind.annotation.RequestBody DeepLearningPredictBatchRequest request) {
         return ResponseEntity.ok(predictionService.predictBatch(request));
+    }
+
+    @GetMapping("/predictions/current")
+    @PreAuthorize("hasAnyAuthority('ADMIN')")
+    public ResponseEntity<DeepLearningCurrentPredictionsResponse> getCurrentPredictions(
+            @AuthenticationPrincipal User currentUser,
+            @RequestParam(required = false) String diagramId,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime from,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime to,
+            @RequestParam(required = false) Integer limit) {
+
+        if (currentUser == null || currentUser.getOrgId() == null || currentUser.getOrgId().isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED,
+                    "El usuario no pertenece a ninguna organización.");
+        }
+
+        // Obtener dataset actual
+        DeepLearningDatasetResponse dataset = datasetGeneratorService.generateDataset(
+                currentUser.getOrgId(),
+                diagramId,
+                from,
+                to,
+                limit
+        );
+
+        // Generar predicciones cruzadas con DTOs de Dashboard
+        DeepLearningCurrentPredictionsResponse response = predictionService.getCurrentPredictions(dataset.getItems());
+        return ResponseEntity.ok(response);
     }
 }
