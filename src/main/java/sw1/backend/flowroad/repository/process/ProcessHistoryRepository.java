@@ -12,5 +12,7 @@ public interface ProcessHistoryRepository extends MongoRepository<ProcessHistory
 
     List<ProcessHistory> findByProcessInstanceIdOrderByPerformedAtAsc(String processInstanceId);
 
+    List<ProcessHistory> findByProcessInstanceIdIn(List<String> processInstanceIds);
+
     long deleteByProcessInstanceIdIn(List<String> processInstanceIds);
 }
