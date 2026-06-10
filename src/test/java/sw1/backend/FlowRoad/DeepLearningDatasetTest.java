@@ -8,7 +8,10 @@ import sw1.backend.flowroad.dtos.analytics.DeepLearningDatasetItemResponse;
 import sw1.backend.flowroad.services.analytics.DatasetGeneratorService;
 import sw1.backend.flowroad.repository.organization.OrganizationRepository;
 import sw1.backend.flowroad.models.organization.Organization;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 
+import java.io.File;
 import java.io.FileWriter;
 import java.io.PrintWriter;
 import java.util.List;
@@ -28,7 +31,6 @@ public class DeepLearningDatasetTest {
     public void testDatasetGenerationAndAnalyze() throws Exception {
         System.out.println("====== INICIANDO TEST DE EXTRACCION DE DATASET ======");
         
-        // Buscar una organización
         List<Organization> orgs = organizationRepository.findAll();
         if (orgs.isEmpty()) {
             System.out.println("ERROR: No se encontró ninguna organización en la base de datos.");
@@ -45,6 +47,12 @@ public class DeepLearningDatasetTest {
         System.out.println("Resultados obtenidos:");
         System.out.println("Total de items en el dataset: " + response.getTotalItems());
 
+        // Guardar payload completo JSON para FastAPI con módulo JSR310 registrado
+        ObjectMapper mapper = new ObjectMapper();
+        mapper.registerModule(new JavaTimeModule());
+        mapper.writeValue(new File("dataset_payload.json"), response);
+        System.out.println("Payload JSON guardado en dataset_payload.json");
+
         // Analizar distribución de priorityLabel
         Map<String, Long> priorityDist = items.stream()
                 .collect(Collectors.groupingBy(DeepLearningDatasetItemResponse::getPriorityLabel, Collectors.counting()));
@@ -59,13 +67,9 @@ public class DeepLearningDatasetTest {
                 .filter(DeepLearningDatasetItemResponse::isAnomalous)
                 .count();
 
-        // Analizar recommendedAction
         Map<String, Long> actionDist = items.stream()
                 .collect(Collectors.groupingBy(DeepLearningDatasetItemResponse::getRecommendedAction, Collectors.counting()));
 
-        // Analizar SLA fallback vs Real (slaHoursTarget != 24.0 es real si los SLAs reales son distintos de 24,
-        // pero para estar seguros contemos cuántos tienen departamento asignado).
-        // El seeder asigna departamentoId en todos los items de simulación.
         long realSlaCount = items.stream()
                 .filter(item -> item.getAssignedDepartmentId() != null)
                 .count();
@@ -73,18 +77,6 @@ public class DeepLearningDatasetTest {
                 .filter(item -> item.getAssignedDepartmentId() == null)
                 .count();
 
-        // Ejemplos
-        DeepLearningDatasetItemResponse normalExample = items.stream()
-                .filter(item -> "NORMAL".equals(item.getPriorityLabel()))
-                .findFirst()
-                .orElse(null);
-
-        DeepLearningDatasetItemResponse highExample = items.stream()
-                .filter(item -> "HIGH".equals(item.getPriorityLabel()) || item.isAnomalous())
-                .findFirst()
-                .orElse(null);
-
-        // Guardar reporte
         try (PrintWriter writer = new PrintWriter(new FileWriter("dataset_test_report.txt"))) {
             writer.println("=== REPORTE DE ANÁLISIS DE DATASET CU19 ===");
             writer.println("Organización: " + org.getName() + " (ID: " + orgId + ")");
@@ -99,37 +91,8 @@ public class DeepLearningDatasetTest {
             writer.println("\nSLA Targets:");
             writer.println("  - Con departamento asignado (SLA Target real si existe en depto): " + realSlaCount);
             writer.println("  - Sin departamento (Usa fallback 24h): " + fallbackSlaCount);
-
-            writer.println("\n--- EJEMPLO ITEM NORMAL ---");
-            if (normalExample != null) {
-                writer.println("Instance ID: " + normalExample.getProcessInstanceId());
-                writer.println("Assignment ID: " + normalExample.getAssignmentId());
-                writer.println("Diagram Name: " + normalExample.getDiagramName());
-                writer.println("Step Index: " + normalExample.getStepIndex());
-                writer.println("Duration Hours: " + normalExample.getAssignmentDurationHours());
-                writer.println("SLA Target: " + normalExample.getSlaHoursTarget());
-                writer.println("Priority Label: " + normalExample.getPriorityLabel());
-                writer.println("Recommended Action: " + normalExample.getRecommendedAction());
-            } else {
-                writer.println("No se encontró ningún item NORMAL");
-            }
-
-            writer.println("\n--- EJEMPLO ITEM HIGH / ANOMALOUS ---");
-            if (highExample != null) {
-                writer.println("Instance ID: " + highExample.getProcessInstanceId());
-                writer.println("Assignment ID: " + highExample.getAssignmentId());
-                writer.println("Diagram Name: " + highExample.getDiagramName());
-                writer.println("Step Index: " + highExample.getStepIndex());
-                writer.println("Duration Hours: " + highExample.getAssignmentDurationHours());
-                writer.println("SLA Target: " + highExample.getSlaHoursTarget());
-                writer.println("Priority Label: " + highExample.getPriorityLabel());
-                writer.println("Recommended Action: " + highExample.getRecommendedAction());
-                writer.println("Is Anomalous: " + highExample.isAnomalous());
-            } else {
-                writer.println("No se encontró ningún item HIGH/ANOMALOUS");
-            }
         }
 
-        System.out.println("====== REPORTE GENERADO EN dataset_test_report.txt ======");
+        System.out.println("====== REPORTE GENERADO ======");
     }
 }

@@ -42,6 +42,9 @@ onlyoffice:
   callback-base-url: ${ONLYOFFICE_CALLBACK_BASE_URL:http://host.docker.internal:8080/api/v1}
 
 flowroad:
+  ia:
+    base-url: ${FLOWROAD_IA_BASE_URL:http://localhost:8000}
+    timeout-ms: ${FLOWROAD_IA_TIMEOUT_MS:5000}
   seed:
     enabled: ${FLOWROAD_SEED_ENABLED:false}
     superuser:

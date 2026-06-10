@@ -69,4 +69,12 @@ public class ApplicationConfig {
     public MongoTransactionManager transactionManager(MongoDatabaseFactory mongoDatabaseFactory) {
         return new MongoTransactionManager(mongoDatabaseFactory);
     }
+
+    @Bean
+    public org.springframework.web.client.RestTemplate restTemplate() {
+        org.springframework.http.client.SimpleClientHttpRequestFactory factory = new org.springframework.http.client.SimpleClientHttpRequestFactory();
+        factory.setConnectTimeout(5000);
+        factory.setReadTimeout(5000);
+        return new org.springframework.web.client.RestTemplate(factory);
+    }
 }

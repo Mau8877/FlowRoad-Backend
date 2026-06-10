@@ -14,7 +14,13 @@ import org.springframework.web.server.ResponseStatusException;
 import lombok.RequiredArgsConstructor;
 import sw1.backend.flowroad.models.user.User;
 import sw1.backend.flowroad.dtos.analytics.DeepLearningDatasetResponse;
+import sw1.backend.flowroad.dtos.analytics.DeepLearningHealthResponse;
+import sw1.backend.flowroad.dtos.analytics.DeepLearningPredictRequest;
+import sw1.backend.flowroad.dtos.analytics.DeepLearningPredictResponse;
+import sw1.backend.flowroad.dtos.analytics.DeepLearningPredictBatchRequest;
+import sw1.backend.flowroad.dtos.analytics.DeepLearningPredictBatchResponse;
 import sw1.backend.flowroad.services.analytics.DatasetGeneratorService;
+import sw1.backend.flowroad.services.analytics.DeepLearningPredictionService;
 
 import java.time.LocalDateTime;
 
@@ -24,6 +30,7 @@ import java.time.LocalDateTime;
 public class DeepLearningAnalyticsController {
 
     private final DatasetGeneratorService datasetGeneratorService;
+    private final DeepLearningPredictionService predictionService;
 
     @GetMapping("/dataset")
     @PreAuthorize("hasAnyAuthority('ADMIN')")
@@ -48,5 +55,25 @@ public class DeepLearningAnalyticsController {
         );
 
         return ResponseEntity.ok(dataset);
+    }
+
+    @GetMapping("/health")
+    @PreAuthorize("hasAnyAuthority('ADMIN')")
+    public ResponseEntity<DeepLearningHealthResponse> getDeepLearningHealth() {
+        return ResponseEntity.ok(predictionService.getHealth());
+    }
+
+    @org.springframework.web.bind.annotation.PostMapping("/predict")
+    @PreAuthorize("hasAnyAuthority('ADMIN')")
+    public ResponseEntity<DeepLearningPredictResponse> predictDeepLearningRisk(
+            @org.springframework.web.bind.annotation.RequestBody DeepLearningPredictRequest request) {
+        return ResponseEntity.ok(predictionService.predict(request));
+    }
+
+    @org.springframework.web.bind.annotation.PostMapping("/predict-batch")
+    @PreAuthorize("hasAnyAuthority('ADMIN')")
+    public ResponseEntity<DeepLearningPredictBatchResponse> predictDeepLearningRiskBatch(
+            @org.springframework.web.bind.annotation.RequestBody DeepLearningPredictBatchRequest request) {
+        return ResponseEntity.ok(predictionService.predictBatch(request));
     }
 }
