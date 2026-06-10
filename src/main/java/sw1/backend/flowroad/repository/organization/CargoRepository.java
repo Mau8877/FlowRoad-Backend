@@ -1,12 +1,10 @@
 package sw1.backend.flowroad.repository.organization;
 
 import org.springframework.data.mongodb.repository.MongoRepository;
-import org.springframework.stereotype.Repository;
 import sw1.backend.flowroad.models.organization.Cargo;
 
 import java.util.List;
 
-@Repository
 public interface CargoRepository extends MongoRepository<Cargo, String> {
 
     // Buscar todos los cargos de una empresa específica

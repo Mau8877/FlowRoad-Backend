@@ -4,12 +4,10 @@ import java.util.List;
 import java.util.Optional;
 
 import org.springframework.data.mongodb.repository.MongoRepository;
-import org.springframework.stereotype.Repository;
 
 import sw1.backend.flowroad.models.document.DocumentRequirement;
 import sw1.backend.flowroad.models.document.DocumentRequirement.DocumentRequirementStatus;
 
-@Repository
 public interface DocumentRequirementRepository extends MongoRepository<DocumentRequirement, String> {
 
     List<DocumentRequirement> findByOrgIdAndDiagramIdAndNodeIdAndStatus(

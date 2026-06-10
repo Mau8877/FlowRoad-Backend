@@ -1,13 +1,11 @@
 package sw1.backend.flowroad.repository.organization;
 
 import org.springframework.data.mongodb.repository.MongoRepository;
-import org.springframework.stereotype.Repository;
 import sw1.backend.flowroad.models.organization.Department;
 
 import java.util.List;
 import java.util.Optional;
 
-@Repository
 public interface DepartmentRepository extends MongoRepository<Department, String> {
 
     // 1. Buscar todos los departamentos de una organización específica

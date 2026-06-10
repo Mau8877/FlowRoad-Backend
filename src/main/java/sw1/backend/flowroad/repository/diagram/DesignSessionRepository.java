@@ -3,11 +3,9 @@ package sw1.backend.flowroad.repository.diagram;
 import java.util.Optional;
 
 import org.springframework.data.mongodb.repository.MongoRepository;
-import org.springframework.stereotype.Repository;
 
 import sw1.backend.flowroad.models.diagram.DesignSession;
 
-@Repository
 public interface DesignSessionRepository extends MongoRepository<DesignSession, String> {
 
     // 1. Encontrar la sesión activa usando el Token (Para cuando alguien entra por
