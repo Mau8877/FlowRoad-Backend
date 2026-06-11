@@ -800,6 +800,77 @@ public class ProcessInstanceService {
         });
     }
 
+    @Transactional
+    public ProcessInstanceSummaryResponse createClientProcessInstance(
+            String diagramId,
+            String organizationId,
+            User clientUser,
+            Map<String, Object> requestData) {
+
+        Diagram diagram = diagramRepository.findById(diagramId)
+                .orElseThrow(() -> new ResourceNotFoundException("Diagrama no encontrado para crear la instancia."));
+
+        if (!Boolean.TRUE.equals(diagram.getIsActive())) {
+            throw new IllegalArgumentException("El trámite seleccionado no está activo.");
+        }
+
+        // Validar que el workflow pertenezca a la organización seleccionada
+        if (!Objects.equals(diagram.getOrgId(), organizationId)) {
+            throw new IllegalArgumentException("El trámite no pertenece a la organización seleccionada.");
+        }
+
+        DiagramRuntime runtime = buildRuntime(diagram);
+
+        Diagram.DiagramCell initialNode = runtime.nodes.values().stream()
+                .filter(node -> getNodeType(runtime, node) == NodeType.INITIAL)
+                .findFirst()
+                .orElseThrow(() -> new IllegalArgumentException("El diagrama no contiene un nodo INITIAL."));
+
+        List<Diagram.DiagramCell> initialOutgoing = runtime.outgoingByNode.getOrDefault(initialNode.getId(), List.of());
+
+        if (initialOutgoing.isEmpty()) {
+            throw new IllegalArgumentException("El nodo INITIAL no tiene una salida configurada.");
+        }
+
+        if (initialOutgoing.size() > 1) {
+            throw new IllegalArgumentException("El nodo INITIAL no puede tener más de una salida en esta versión.");
+        }
+
+        LocalDateTime now = LocalDateTime.now();
+
+        ProcessInstance instance = ProcessInstance.builder()
+                .code(generateProcessCode())
+                .orgId(diagram.getOrgId())
+                .diagramId(diagram.getId())
+                .diagramName(diagram.getName())
+                .diagramVersion(diagram.getVersion())
+                .status(ProcessInstanceStatus.RUNNING)
+                .activeNodeIds(new ArrayList<>())
+                .completedNodeIds(new ArrayList<>(List.of(initialNode.getId())))
+                .nodeActivationCounts(new HashMap<>())
+                .requestData(requestData != null ? requestData : Map.of())
+                .clientId(clientUser.getId())
+                .clientName(getUserDisplayName(clientUser))
+                .clientEmail(clientUser.getEmail())
+                .startedByUserId(clientUser.getId())
+                .startedByUserName(getUserDisplayName(clientUser))
+                .startedAt(now)
+                .updatedAt(now)
+                .build();
+
+        ProcessInstance saved = processInstanceRepository.save(instance);
+
+        String targetId = getTargetNodeId(initialOutgoing.get(0));
+        if (targetId != null) {
+            activateOrAdvanceNode(saved, runtime, targetId, initialNode.getId());
+        }
+
+        refreshProcessStatus(saved);
+        ProcessInstance finalSaved = processInstanceRepository.save(saved);
+        processNotificationService.notifyProcessInstanceUpdated(finalSaved, "PROCESS_CREATED");
+        return mapSummary(finalSaved);
+    }
+
     private ProcessInstance cancelInstanceInternal(ProcessInstance instance, LocalDateTime now) {
         List<ProcessAssignment> pendingAssignments = processAssignmentRepository
                 .findByProcessInstanceIdAndStatus(instance.getId(), ProcessAssignmentStatus.PENDING);
