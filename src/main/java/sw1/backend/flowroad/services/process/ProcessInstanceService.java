@@ -30,6 +30,9 @@ import sw1.backend.flowroad.dtos.process.ProcessInstanceSummaryResponse;
 import sw1.backend.flowroad.exceptions.AuthException;
 import sw1.backend.flowroad.exceptions.ResourceNotFoundException;
 import sw1.backend.flowroad.models.diagram.Diagram;
+import sw1.backend.flowroad.models.document.DocumentFile.DocumentFileStatus;
+import sw1.backend.flowroad.models.document.DocumentRequirement;
+import sw1.backend.flowroad.models.document.DocumentRequirement.DocumentRequirementStatus;
 import sw1.backend.flowroad.models.process.ProcessAssignment;
 import sw1.backend.flowroad.models.process.ProcessAssignment.ProcessAssignmentStatus;
 import sw1.backend.flowroad.models.process.ProcessHistory;
@@ -39,6 +42,8 @@ import sw1.backend.flowroad.models.templates.Template;
 import sw1.backend.flowroad.models.user.Roles;
 import sw1.backend.flowroad.models.user.User;
 import sw1.backend.flowroad.repository.diagram.DiagramRepository;
+import sw1.backend.flowroad.repository.document.DocumentFileRepository;
+import sw1.backend.flowroad.repository.document.DocumentRequirementRepository;
 import sw1.backend.flowroad.repository.organization.CargoRepository;
 import sw1.backend.flowroad.repository.organization.DepartmentRepository;
 import sw1.backend.flowroad.repository.process.ProcessAssignmentRepository;
@@ -61,15 +66,29 @@ public class ProcessInstanceService {
     private final DepartmentRepository departmentRepository;
     private final CargoRepository cargoRepository;
     private final TemplateRepository templateRepository;
+    private final DocumentRequirementRepository documentRequirementRepository;
+    private final DocumentFileRepository documentFileRepository;
 
     @Transactional
     public ProcessInstanceSummaryResponse createProcessInstance(
             String diagramId,
+            String clientId,
             Map<String, Object> requestData,
             User startedBy) {
 
         Diagram diagram = diagramRepository.findByIdAndOrgId(diagramId, startedBy.getOrgId())
                 .orElseThrow(() -> new ResourceNotFoundException("Diagrama no encontrado para crear la instancia."));
+
+        User client = userRepository.findById(clientId)
+                .orElseThrow(() -> new ResourceNotFoundException("Cliente no encontrado."));
+
+        if (client.getRole() != Roles.CLIENT) {
+            throw new AuthException("El usuario seleccionado no es un cliente.");
+        }
+
+        if (!Boolean.TRUE.equals(client.getIsActive())) {
+            throw new AuthException("El cliente seleccionado no esta activo.");
+        }
 
         DiagramRuntime runtime = buildRuntime(diagram);
 
@@ -101,6 +120,9 @@ public class ProcessInstanceService {
                 .completedNodeIds(new ArrayList<>(List.of(initialNode.getId())))
                 .nodeActivationCounts(new HashMap<>())
                 .requestData(requestData != null ? requestData : Map.of())
+                .clientId(client.getId())
+                .clientName(getUserDisplayName(client))
+                .clientEmail(client.getEmail())
                 .startedByUserId(startedBy.getId())
                 .startedByUserName(getUserDisplayName(startedBy))
                 .startedAt(now)
@@ -187,6 +209,8 @@ public class ProcessInstanceService {
         if (!Objects.equals(assignment.getAssignedUserId(), currentUser.getId())) {
             throw new AuthException("No puedes completar una asignaciÃ³n de otro usuario.");
         }
+
+        validateRequiredDocumentsCompleted(instance, assignment);
 
         Diagram diagram = diagramRepository.findByIdAndOrgId(instance.getDiagramId(), currentUser.getOrgId())
                 .orElseThrow(() -> new ResourceNotFoundException("Diagrama base de la instancia no encontrado."));
@@ -776,6 +800,77 @@ public class ProcessInstanceService {
         });
     }
 
+    @Transactional
+    public ProcessInstanceSummaryResponse createClientProcessInstance(
+            String diagramId,
+            String organizationId,
+            User clientUser,
+            Map<String, Object> requestData) {
+
+        Diagram diagram = diagramRepository.findById(diagramId)
+                .orElseThrow(() -> new ResourceNotFoundException("Diagrama no encontrado para crear la instancia."));
+
+        if (!Boolean.TRUE.equals(diagram.getIsActive())) {
+            throw new IllegalArgumentException("El trámite seleccionado no está activo.");
+        }
+
+        // Validar que el workflow pertenezca a la organización seleccionada
+        if (!Objects.equals(diagram.getOrgId(), organizationId)) {
+            throw new IllegalArgumentException("El trámite no pertenece a la organización seleccionada.");
+        }
+
+        DiagramRuntime runtime = buildRuntime(diagram);
+
+        Diagram.DiagramCell initialNode = runtime.nodes.values().stream()
+                .filter(node -> getNodeType(runtime, node) == NodeType.INITIAL)
+                .findFirst()
+                .orElseThrow(() -> new IllegalArgumentException("El diagrama no contiene un nodo INITIAL."));
+
+        List<Diagram.DiagramCell> initialOutgoing = runtime.outgoingByNode.getOrDefault(initialNode.getId(), List.of());
+
+        if (initialOutgoing.isEmpty()) {
+            throw new IllegalArgumentException("El nodo INITIAL no tiene una salida configurada.");
+        }
+
+        if (initialOutgoing.size() > 1) {
+            throw new IllegalArgumentException("El nodo INITIAL no puede tener más de una salida en esta versión.");
+        }
+
+        LocalDateTime now = LocalDateTime.now();
+
+        ProcessInstance instance = ProcessInstance.builder()
+                .code(generateProcessCode())
+                .orgId(diagram.getOrgId())
+                .diagramId(diagram.getId())
+                .diagramName(diagram.getName())
+                .diagramVersion(diagram.getVersion())
+                .status(ProcessInstanceStatus.RUNNING)
+                .activeNodeIds(new ArrayList<>())
+                .completedNodeIds(new ArrayList<>(List.of(initialNode.getId())))
+                .nodeActivationCounts(new HashMap<>())
+                .requestData(requestData != null ? requestData : Map.of())
+                .clientId(clientUser.getId())
+                .clientName(getUserDisplayName(clientUser))
+                .clientEmail(clientUser.getEmail())
+                .startedByUserId(clientUser.getId())
+                .startedByUserName(getUserDisplayName(clientUser))
+                .startedAt(now)
+                .updatedAt(now)
+                .build();
+
+        ProcessInstance saved = processInstanceRepository.save(instance);
+
+        String targetId = getTargetNodeId(initialOutgoing.get(0));
+        if (targetId != null) {
+            activateOrAdvanceNode(saved, runtime, targetId, initialNode.getId());
+        }
+
+        refreshProcessStatus(saved);
+        ProcessInstance finalSaved = processInstanceRepository.save(saved);
+        processNotificationService.notifyProcessInstanceUpdated(finalSaved, "PROCESS_CREATED");
+        return mapSummary(finalSaved);
+    }
+
     private ProcessInstance cancelInstanceInternal(ProcessInstance instance, LocalDateTime now) {
         List<ProcessAssignment> pendingAssignments = processAssignmentRepository
                 .findByProcessInstanceIdAndStatus(instance.getId(), ProcessAssignmentStatus.PENDING);
@@ -1144,6 +1239,9 @@ public class ProcessInstanceService {
                         instance.getActiveNodeIds() != null ? instance.getActiveNodeIds() : List.of()))
                 .completedNodeIds(new ArrayList<>(
                         instance.getCompletedNodeIds() != null ? instance.getCompletedNodeIds() : List.of()))
+                .clientId(instance.getClientId())
+                .clientName(instance.getClientName())
+                .clientEmail(instance.getClientEmail())
                 .startedByUserId(instance.getStartedByUserId())
                 .startedByUserName(instance.getStartedByUserName())
                 .startedAt(instance.getStartedAt())
@@ -1248,6 +1346,46 @@ public class ProcessInstanceService {
                     return labels;
                 })
                 .orElse(Map.of());
+    }
+
+    private void validateRequiredDocumentsCompleted(ProcessInstance instance, ProcessAssignment assignment) {
+        List<DocumentRequirement> missingRequirements = documentRequirementRepository
+                .findByOrgIdAndDiagramIdAndNodeIdAndStatus(
+                        instance.getOrgId(),
+                        instance.getDiagramId(),
+                        assignment.getNodeId(),
+                        DocumentRequirementStatus.ACTIVE)
+                .stream()
+                .filter(requirement -> Boolean.TRUE.equals(requirement.getRequired()))
+                .filter(requirement -> !hasActiveDocumentForRequirement(instance, requirement))
+                .toList();
+
+        if (missingRequirements.isEmpty()) {
+            return;
+        }
+
+        String missingNames = missingRequirements.stream()
+                .map(DocumentRequirement::getName)
+                .filter(Objects::nonNull)
+                .filter(name -> !name.isBlank())
+                .collect(Collectors.joining(", "));
+
+        if (missingNames.isBlank()) {
+            missingNames = "documentos obligatorios";
+        }
+
+        throw new IllegalArgumentException(
+                "No se puede completar la tarea. Faltan documentos obligatorios: " + missingNames + ".");
+    }
+
+    private boolean hasActiveDocumentForRequirement(ProcessInstance instance, DocumentRequirement requirement) {
+        return !documentFileRepository
+                .findByOrgIdAndProcessInstanceIdAndDocumentRequirementIdAndStatus(
+                        instance.getOrgId(),
+                        instance.getId(),
+                        requirement.getId(),
+                        DocumentFileStatus.ACTIVE)
+                .isEmpty();
     }
 
     private enum NodeType {

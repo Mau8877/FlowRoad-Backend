@@ -4,12 +4,10 @@ import java.util.List;
 import java.util.Optional;
 
 import org.springframework.data.mongodb.repository.MongoRepository;
-import org.springframework.stereotype.Repository;
 
 import sw1.backend.flowroad.models.process.ProcessAssignment;
 import sw1.backend.flowroad.models.process.ProcessAssignment.ProcessAssignmentStatus;
 
-@Repository
 public interface ProcessAssignmentRepository extends MongoRepository<ProcessAssignment, String> {
 
         List<ProcessAssignment> findByProcessInstanceId(String processInstanceId);
@@ -40,5 +38,7 @@ public interface ProcessAssignmentRepository extends MongoRepository<ProcessAssi
         List<ProcessAssignment> findByAssignedUserIdAndStatusOrderByAssignedAtDesc(
                         String assignedUserId,
                         ProcessAssignmentStatus status);
+
+        long deleteByProcessInstanceIdIn(List<String> processInstanceIds);
 
 }

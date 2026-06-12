@@ -4,11 +4,9 @@ import java.util.List;
 import java.util.Optional;
 
 import org.springframework.data.mongodb.repository.MongoRepository;
-import org.springframework.stereotype.Repository;
 
 import sw1.backend.flowroad.models.templates.Template;
 
-@Repository
 public interface TemplateRepository extends MongoRepository<Template, String> {
 
     // 1. Obtener todas las plantillas de una organización (Útil para la tabla del

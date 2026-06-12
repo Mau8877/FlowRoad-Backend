@@ -1,13 +1,19 @@
 package sw1.backend.flowroad.services.user;
 
 import java.util.List;
+import java.util.Optional;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
+import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.data.mongodb.core.query.Criteria;
+import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
 import sw1.backend.flowroad.dtos.organization.CargoSummaryResponse;
 import sw1.backend.flowroad.dtos.organization.DepartmentSummaryResponse;
+import sw1.backend.flowroad.dtos.user.ClientSearchResponse;
 import sw1.backend.flowroad.dtos.user.UpdateUserRequest;
 import sw1.backend.flowroad.dtos.user.UserProfileResponse;
 import sw1.backend.flowroad.dtos.user.UserResponse;
@@ -25,6 +31,7 @@ public class UserService {
     private final UserRepository userRepository;
     private final DepartmentRepository departmentRepository;
     private final CargoRepository cargoRepository;
+    private final MongoTemplate mongoTemplate;
 
     // 1. OBTENER PERFIL POR ID
     public UserResponse getById(String id) {
@@ -38,6 +45,32 @@ public class UserService {
         return userRepository.findAllByOrgId(orgId)
                 .stream()
                 .map(this::convertToResponseDTO)
+                .collect(Collectors.toList());
+    }
+
+    public List<ClientSearchResponse> searchClients(String q, Integer limit) {
+        String safeQuery = q != null ? q.trim() : "";
+
+        if (safeQuery.length() < 2) {
+            return List.of();
+        }
+
+        int safeLimit = limit != null ? Math.max(1, Math.min(limit, 20)) : 10;
+        Pattern literalQuery = Pattern.compile(Pattern.quote(safeQuery), Pattern.CASE_INSENSITIVE);
+
+        Query query = new Query()
+                .addCriteria(new Criteria().andOperator(
+                        Criteria.where("role").is(Roles.CLIENT),
+                        Criteria.where("isActive").is(true),
+                        new Criteria().orOperator(
+                                Criteria.where("email").regex(literalQuery),
+                                Criteria.where("profile.nombre").regex(literalQuery),
+                                Criteria.where("profile.apellido").regex(literalQuery))))
+                .limit(safeLimit);
+
+        return mongoTemplate.find(query, User.class)
+                .stream()
+                .map(this::convertToClientSearchResponse)
                 .collect(Collectors.toList());
     }
 
@@ -120,5 +153,33 @@ public class UserService {
                     user.getProfile().getAvatarUrl()));
         }
         return res;
+    }
+
+    private ClientSearchResponse convertToClientSearchResponse(User user) {
+        String avatarUrl = user.getProfile() != null ? user.getProfile().getAvatarUrl() : null;
+
+        return new ClientSearchResponse(
+                user.getId(),
+                getUserDisplayName(user),
+                user.getEmail(),
+                avatarUrl);
+    }
+
+    private String getUserDisplayName(User user) {
+        if (user == null) {
+            return "Usuario";
+        }
+
+        if (user.getProfile() != null) {
+            String nombre = Optional.ofNullable(user.getProfile().getNombre()).orElse("");
+            String apellido = Optional.ofNullable(user.getProfile().getApellido()).orElse("");
+            String fullName = (nombre + " " + apellido).trim();
+
+            if (!fullName.isBlank()) {
+                return fullName;
+            }
+        }
+
+        return user.getEmail() != null ? user.getEmail() : user.getId();
     }
 }

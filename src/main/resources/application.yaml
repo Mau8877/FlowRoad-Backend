@@ -1,6 +1,12 @@
 spring:
   application:
     name: flowroad-backend
+
+  servlet:
+    multipart:
+      enabled: true
+      max-file-size: 100MB
+      max-request-size: 110MB
   
   # (Capa de Infraestructura)
   data:
@@ -25,3 +31,40 @@ firebase:
   credentials:
     path: ${FIREBASE_CREDENTIALS_PATH:}
 
+aws:
+  region: ${AWS_REGION:}
+  s3:
+    bucket: ${AWS_S3_BUCKET:}
+
+onlyoffice:
+  document-server-url: ${ONLYOFFICE_DOCUMENT_SERVER_URL:http://localhost:8082}
+  jwt-secret: ${ONLYOFFICE_JWT_SECRET:flowroad_onlyoffice_secret}
+  callback-base-url: ${ONLYOFFICE_CALLBACK_BASE_URL:http://host.docker.internal:8080/api/v1}
+
+flowroad:
+  ia:
+    base-url: ${FLOWROAD_IA_BASE_URL:http://localhost:8000}
+    timeout-ms: ${FLOWROAD_IA_TIMEOUT_MS:30000}
+    batch-size: ${FLOWROAD_IA_BATCH_SIZE:50}
+  seed:
+    enabled: ${FLOWROAD_SEED_ENABLED:false}
+    superuser:
+      email: ${FLOWROAD_SEED_SUPERUSER_EMAIL:superuser@gmail.com}
+      password: ${FLOWROAD_SEED_SUPERUSER_PASSWORD:superuser}
+    organization:
+      name: ${FLOWROAD_SEED_ORG_NAME:Banco BCB}
+      code: ${FLOWROAD_SEED_ORG_CODE:BCB}
+    organization-admin:
+      email: ${FLOWROAD_SEED_ORG_ADMIN_EMAIL:adminBCB123@gmail.com}
+      password: ${FLOWROAD_SEED_ORG_ADMIN_PASSWORD:adminBCB123}
+    clients:
+      enabled: ${FLOWROAD_SEED_CLIENTS_ENABLED:false}
+    org-structure:
+      enabled: ${FLOWROAD_SEED_ORG_STRUCTURE_ENABLED:false}
+    history:
+      enabled: ${FLOWROAD_SEED_HISTORY_ENABLED:false}
+      org-code: ${FLOWROAD_SEED_HISTORY_ORG_CODE:${FLOWROAD_SEED_ORG_CODE:BCB}}
+      instances-per-diagram: ${FLOWROAD_SEED_HISTORY_INSTANCES_PER_DIAGRAM:30}
+      days-back: ${FLOWROAD_SEED_HISTORY_DAYS_BACK:90}
+      prefix: ${FLOWROAD_SEED_HISTORY_PREFIX:DEMO-CU19}
+      cleanup-enabled: ${FLOWROAD_SEED_HISTORY_CLEANUP_ENABLED:false}

@@ -1,0 +1,21 @@
+=== REPORTE DE ANÁLISIS DE DATASET CU19 ===
+Organización: Banco BCB (ID: 6a25c04e27d55c4b6e125e8d)
+Total Items: 840
+Representa asignaciones: Sí (cada ítem corresponde a una asignación y tiene assignmentId)
+
+Distribución de priorityLabel:
+  - HIGH: 208
+  - MEDIUM: 54
+  - NORMAL: 578
+
+Cantidad de isBottleneck=true: 229
+Cantidad de isAnomalous=true: 208
+
+Distribución de recommendedAction:
+  - ESCALATE: 208
+  - CONTINUE: 578
+  - MONITOR: 54
+
+SLA Targets:
+  - Con departamento asignado (SLA Target real si existe en depto): 840
+  - Sin departamento (Usa fallback 24h): 0

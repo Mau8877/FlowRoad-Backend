@@ -1,14 +1,12 @@
 package sw1.backend.flowroad.repository.organization;
 
 import org.springframework.data.mongodb.repository.MongoRepository;
-import org.springframework.stereotype.Repository;
 
 import sw1.backend.flowroad.models.organization.Organization;
 
 import java.util.List;
 import java.util.Optional;
 
-@Repository
 public interface OrganizationRepository extends MongoRepository<Organization, String> {
 
     // Buscar solo las que están activas (Para el uso diario)
