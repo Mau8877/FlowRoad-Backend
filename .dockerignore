@@ -6,8 +6,12 @@ target
 *.iml
 .env
 .env.*
-node_modules
 logs
 *.log
-*.json
+dataset_payload.json
+test.json
+README.md
+HELP.md
+BASE_DE_DATOS.md
+DIAGNOSTICO_*.md
 src/main/resources/flowroad-8877-firebase-adminsdk-fbsvc-570816fa3b
