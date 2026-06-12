@@ -3,6 +3,7 @@ package sw1.backend.flowroad.security;
 import java.util.Arrays;
 import java.util.List;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.authentication.AuthenticationProvider;
@@ -25,16 +26,16 @@ public class SecurityConfig {
         private final JwtAuthenticationFilter jwtAuthFilter;
         private final AuthenticationProvider authenticationProvider;
 
+        @Value("${flowroad.cors.allowed-origins:http://localhost:5173,http://localhost:3000,http://localhost:4200}")
+        private String allowedOrigins;
+
         @Bean
         public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
                 http
                                 .csrf(csrf -> csrf.disable())
                                 .cors(cors -> cors.configurationSource(request -> {
                                         CorsConfiguration config = new CorsConfiguration();
-                                        config.setAllowedOrigins(
-                                                        List.of("http://localhost:5173", "http://localhost:3000",
-                                                                        "http://localhost:4200",
-                                                                        "http://18.191.37.123"));
+                                        config.setAllowedOrigins(parseAllowedOrigins());
                                         config.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "DELETE", "PATCH",
                                                         "OPTIONS"));
                                         config.setAllowedHeaders(List.of("*"));
@@ -59,5 +60,12 @@ public class SecurityConfig {
                                 .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
 
                 return http.build();
+        }
+
+        private List<String> parseAllowedOrigins() {
+                return Arrays.stream(allowedOrigins.split(","))
+                                .map(String::trim)
+                                .filter(origin -> !origin.isBlank())
+                                .toList();
         }
 }
